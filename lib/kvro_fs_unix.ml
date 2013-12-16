@@ -16,7 +16,7 @@
 
 open Lwt
 
-type +'a io
+type +'a io = 'a Lwt.t
 type id = string
 type error =
   | Unknown_key of string
@@ -28,7 +28,7 @@ type t = {
 
 let connect id =
   (* TODO verify base directory exists *)
-  return { base=id }
+  return (`Ok { base=id })
 
 let disconnect t =
   return ()
