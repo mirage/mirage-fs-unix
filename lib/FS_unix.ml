@@ -1,0 +1,189 @@
+(*
+ * Copyright (c) 2013-2014 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2014      Thomas Gazagnaire <thomas@gazagnaire.org>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *)
+
+open Lwt
+
+type +'a io = 'a Lwt.t
+type id = string
+type block_device_error = unit
+
+type error = [
+  | `Not_a_directory of string
+  | `Is_a_directory of string
+  | `Directory_not_empty of string
+  | `No_directory_entry of string * string
+  | `File_already_exists of string
+  | `No_space
+  | `Format_not_recognised of string
+  | `Unknown_error of string
+  | `Block_device of block_device_error
+]
+type page_aligned_buffer = Cstruct.t
+
+let string_of_error = function
+  | `Not_a_directory x         -> Printf.sprintf "%s is not a directory" x
+  | `Is_a_directory x          -> Printf.sprintf "%s is a directory" x
+  | `Directory_not_empty x     -> Printf.sprintf "The directory %s is not empty" x
+  | `No_directory_entry (x, y) -> Printf.sprintf "The directory %s contains no entry called %s" x y
+  | `File_already_exists x     -> Printf.sprintf "The filename %s already exists" x
+  | `No_space -> "There is insufficient free space to complete this operation"
+  | `Format_not_recognised x   -> Printf.sprintf "This disk is not formatted with %s" x
+  | `Unknown_error x           -> Printf.sprintf "Unknown error: %s" x
+  | `Block_device x            -> Printf.sprintf "Block device error"
+
+exception Error of error
+
+let (>>|) x f =
+  x >>= function
+  | `Ok x    -> f x
+  | `Error e -> fail (Error e)
+
+type t = {
+  base: string
+}
+
+let connect id =
+  (* TODO verify base directory exists *)
+  return (`Ok { base=id })
+
+let disconnect t =
+  return ()
+
+let id {base} = base
+
+let read {base} name off len =
+  prerr_endline ("read: " ^ name);
+  let fullname = Filename.concat base name in
+  try_lwt
+    Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0
+    >>= fun fd ->
+    let st =
+      Lwt_stream.from (fun () ->
+        let buf = Cstruct.create 4096 in
+        lwt len = Lwt_cstruct.read fd buf in
+        match len with
+        | 0 ->
+           Lwt_unix.close fd
+           >>= fun () -> return None
+        | len ->
+           return (Some (Cstruct.sub buf 0 len))
+        )
+    in
+    Lwt_stream.to_list st
+    >>= fun bufs ->
+    return (`Ok bufs)
+   with exn ->
+     return (`Error (`No_directory_entry (base, name)))
+
+let size {base} name =
+  prerr_endline ("size: " ^ name);
+  let fullname = Filename.concat base name in
+  try_lwt
+    Lwt_unix.stat fullname
+    >>= fun stat ->
+    let size = Int64.of_int (stat.Lwt_unix.st_size) in
+    return (`Ok size)
+  with exn ->
+    return (`Error (`No_directory_entry (base, name)))
+
+type stat = {
+  filename: string;
+  read_only: bool;
+  directory: bool;
+  size: int64;
+}
+
+let (/) = Filename.concat
+
+let mkdir {base} path =
+  let path = base / path in
+  let rec aux dir =
+    if Sys.file_exists dir then return_unit
+    else (
+      aux (Filename.dirname dir) >>= fun () ->
+      if Sys.file_exists dir then return_unit
+      else
+        catch
+          (fun () -> Lwt_unix.mkdir dir 0o755)
+          (fun _  -> return_unit)
+    ) in
+  aux path >>= fun () ->
+  return (`Ok ())
+
+let command fmt =
+  Printf.ksprintf (fun str ->
+      let i = Sys.command str in
+      if i <> 0 then
+        return (`Error (`Unknown_error (str ^ ": exit " ^ string_of_int i)))
+      else
+        return (`Ok ())
+    ) fmt
+
+let format {base} _ =
+  assert (base <> "/");
+  command "rm -rf %s" base
+
+let destroy {base} path =
+  command "rm -rf %s/%s" base path
+
+let create {base} path =
+  mkdir {base} (Filename.dirname path) >>| fun () ->
+  let file = base / path in
+  command "touch %s" file
+
+let stat {base} path0 =
+  let path = base / path0 in
+  try_lwt
+    Lwt_unix.stat path >>= fun stat ->
+    let size = Int64.of_int (stat.Lwt_unix.st_size) in
+    let filename = Filename.basename path in
+    let read_only = false in
+    let directory = Sys.is_directory path in
+    return (`Ok { filename; read_only; directory; size })
+  with exn ->
+    return (`Error (`No_directory_entry (base, path0)))
+
+let listdir {base} path =
+  let path = base / path in
+  if Sys.file_exists path then (
+    let s = Lwt_unix.files_of_directory path in
+    let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
+    Lwt_stream.to_list s >>= fun l ->
+    return (`Ok l)
+  ) else
+    return (`Ok [])
+
+let write {base} path off buf =
+  mkdir {base} (Filename.dirname path) >>| fun () ->
+  let path = base / path in
+  Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
+  catch
+    (fun () ->
+       Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
+       let buf = Cstruct.to_string buf in
+       let rec aux off remaining =
+         if remaining = 0 then
+           Lwt_unix.close fd
+         else (
+           Lwt_unix.write fd buf off remaining >>= fun n ->
+           aux (off+n) (remaining-n))
+       in
+       aux 0 (String.length buf) >>= fun () ->
+       return (`Ok ()))
+    (fun e ->
+      Lwt_unix.close fd >>= fun () ->
+      return (`Error (`Unknown_error (Printexc.to_string e))))
