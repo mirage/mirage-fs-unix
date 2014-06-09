@@ -1,2 +1,5 @@
+1.1.0:
+* Add an `FS_unix` module which implements `V1_LWT.FS`
+
 1.0.0 (16-Dec-2013):
 * First public release.
