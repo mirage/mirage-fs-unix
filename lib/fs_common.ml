@@ -45,16 +45,9 @@ let normalise filename =
   | None         -> None
 
 let check_filename base name =
-  match normalise base, normalise (Filename.concat base name) with
-  | Some realbase, Some realname ->
-     if String.length realbase <= String.length realname &&
-          String.sub realname 0 (String.length realbase) = realbase then
-       Some realname
-     else (
-       prerr_endline ("directory traversal: " ^ name);
-       None
-     )
-  | _ -> None
+  match normalise name with
+  | Some realname -> Some (Filename.concat base realname)
+  | None          -> None
 
 let read_impl base name off len =
   prerr_endline ("read: " ^ name);
