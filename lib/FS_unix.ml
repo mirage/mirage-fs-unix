@@ -130,8 +130,8 @@ let stat {base} path0 =
   | None -> return (`Error (`No_directory_entry (base, path0)))
   | Some path ->
      try_lwt
-       Lwt_unix.stat path >>= fun stat ->
-       let size = Int64.of_int (stat.Lwt_unix.st_size) in
+       Lwt_unix.LargeFile.stat path >>= fun stat ->
+       let size = stat.Lwt_unix.LargeFile.st_size in
        let filename = Filename.basename path in
        let read_only = false in
        let directory = Sys.is_directory path in

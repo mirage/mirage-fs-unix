@@ -64,8 +64,8 @@ let size_impl base name =
   | None -> return (`Error `Read_out_of_base_tried)
   | Some fullname ->
      try_lwt
-       Lwt_unix.stat fullname >>= fun stat ->
-       let size = Int64.of_int (stat.Lwt_unix.st_size) in
+       Lwt_unix.LargeFile.stat fullname >>= fun stat ->
+       let size = stat.Lwt_unix.LargeFile.st_size in
        return (`Ok size)
      with exn ->
        return (`Error (`No_directory_entry (base, name)))
