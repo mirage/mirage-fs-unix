@@ -11,5 +11,7 @@ Library mirage_fs_unix
   CompiledObject:     best
   Path:               lib
   Findlibname:        mirage-fs-unix
+  InternalModules:    Fs_common
   Modules:            Kvro_fs_unix, FS_unix
   BuildDepends:       lwt, lwt.unix, lwt.syntax, mirage-types, cstruct.lwt
+  CSources:           custom_unix_stubs.c
