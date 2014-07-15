@@ -18,21 +18,40 @@
 
 open Lwt
 
-(* wrapper for realpath(2) *)
-external realpath : string -> string = "unix_realpath"
+let rec split_string delimiter name =
+  let open String in
+  let len = length name in
+  let idx = try index name delimiter with _ -> len in
+  let fst = sub name 0 idx in
+  let idx' = idx + 1 in
+  if idx' <= len then
+    let rt = sub name idx' (len - idx') in
+    fst :: split_string delimiter rt
+  else
+    [fst]
+
+let rec remove_dots parts outp =
+  match parts, outp with
+  | ".."::r, a::rt -> remove_dots r  rt
+  | r::rs  , rt    -> remove_dots rs (rt @ [r])
+  | []     , rt    -> rt
+
+let normalise filename =
+  let parts = split_string '/' filename in
+  let removed = remove_dots parts [] in
+  String.concat "/" removed
+
 
 let check_filename base name =
-  try
-    let realbase = realpath base in
-    let realname = realpath (Filename.concat base name) in
-    if String.length realbase <= String.length realname &&
-         String.sub realname 0 (String.length realbase) = realbase then
-      Some realname
-    else (
-      prerr_endline ("directory traversal: " ^ name);
-      None
-    )
-  with Unix.Unix_error _ -> None
+  let realbase = normalise base in
+  let realname = normalise (Filename.concat base name) in
+  if String.length realbase <= String.length realname &&
+       String.sub realname 0 (String.length realbase) = realbase then
+    Some realname
+  else (
+    prerr_endline ("directory traversal: " ^ name);
+    None
+  )
 
 let read_impl base name off len =
   prerr_endline ("read: " ^ name);
