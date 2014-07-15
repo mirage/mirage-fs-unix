@@ -33,25 +33,28 @@ let rec split_string delimiter name =
 let rec remove_dots parts outp =
   match parts, outp with
   | ".."::r, a::rt -> remove_dots r  rt
-  | r::rs  , rt    -> remove_dots rs (rt @ [r])
-  | []     , rt    -> rt
+  | ".."::r, []    -> None
+  | "."::r , rt    -> remove_dots r  rt
+  | r::rs  , rt    -> remove_dots rs (r :: rt)
+  | []     , rt    -> Some (List.rev rt)
 
 let normalise filename =
   let parts = split_string '/' filename in
-  let removed = remove_dots parts [] in
-  String.concat "/" removed
-
+  match remove_dots parts [] with
+  | Some removed -> Some (String.concat "/" removed)
+  | None         -> None
 
 let check_filename base name =
-  let realbase = normalise base in
-  let realname = normalise (Filename.concat base name) in
-  if String.length realbase <= String.length realname &&
-       String.sub realname 0 (String.length realbase) = realbase then
-    Some realname
-  else (
-    prerr_endline ("directory traversal: " ^ name);
-    None
-  )
+  match normalise base, normalise (Filename.concat base name) with
+  | Some realbase, Some realname ->
+     if String.length realbase <= String.length realname &&
+          String.sub realname 0 (String.length realbase) = realbase then
+       Some realname
+     else (
+       prerr_endline ("directory traversal: " ^ name);
+       None
+     )
+  | _ -> None
 
 let read_impl base name off len =
   prerr_endline ("read: " ^ name);
