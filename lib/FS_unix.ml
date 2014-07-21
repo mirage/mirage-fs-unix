@@ -95,9 +95,8 @@ let rec create_directory path : unit Lwt.t =
   )
 
 let mkdir {base} path =
-  match Fs_common.check_filename base path with
-  | None -> return (`Error (`No_directory_entry (base, path)))
-  | Some path -> create_directory path >|= fun () -> `Ok ()
+  let path = Fs_common.check_filename base path in
+  create_directory path >|= fun () -> `Ok ()
 
 let command fmt =
   Printf.ksprintf (fun str ->
@@ -113,66 +112,55 @@ let format {base} _ =
   command "rm -rf %s" base
 
 let destroy {base} path =
-  match Fs_common.check_filename base path with
-  | None   -> return (`Error (`No_directory_entry (base, path)))
-  | Some p -> command "rm -rf %s" p
+  let path = Fs_common.check_filename base path in
+  command "rm -rf %s" path
 
 let create {base} path =
-  match Fs_common.check_filename base (Filename.dirname path) with
-  | None -> return (`Error (`No_directory_entry (base, path)))
-  | Some path -> create_directory path >>= fun () ->
-                 match Fs_common.check_filename base (Filename.dirname path) with
-                 | None      -> return (`Error (`No_directory_entry (base, path)))
-                 | Some file -> command "touch %s" file
+  let path = Fs_common.check_filename base (Filename.dirname path) in
+  create_directory path >>= fun () ->
+  let file = Fs_common.check_filename base (Filename.dirname path) in
+  command "touch %s" file
 
 let stat {base} path0 =
-  match Fs_common.check_filename base path0 with
-  | None -> return (`Error (`No_directory_entry (base, path0)))
-  | Some path ->
-     try_lwt
-       Lwt_unix.LargeFile.stat path >>= fun stat ->
-       let size = stat.Lwt_unix.LargeFile.st_size in
-       let filename = Filename.basename path in
-       let read_only = false in
-       let directory = Sys.is_directory path in
-       return (`Ok { filename; read_only; directory; size })
-     with exn ->
-       return (`Error (`No_directory_entry (base, path0)))
+  let path = Fs_common.check_filename base path0 in
+  try_lwt
+    Lwt_unix.LargeFile.stat path >>= fun stat ->
+    let size = stat.Lwt_unix.LargeFile.st_size in
+    let filename = Filename.basename path in
+    let read_only = false in
+    let directory = Sys.is_directory path in
+    return (`Ok { filename; read_only; directory; size })
+  with exn ->
+    return (`Error (`No_directory_entry (base, path0)))
 
 let listdir {base} path =
-  match Fs_common.check_filename base path with
-  | None -> return (`Error (`No_directory_entry (base, path)))
-  | Some path ->
-     if Sys.file_exists path then (
-       let s = Lwt_unix.files_of_directory path in
-       let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
-       Lwt_stream.to_list s >>= fun l ->
-       return (`Ok l)
-     ) else
-       return (`Ok [])
+  let path = Fs_common.check_filename base path in
+  if Sys.file_exists path then (
+    let s = Lwt_unix.files_of_directory path in
+    let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
+    Lwt_stream.to_list s >>= fun l ->
+    return (`Ok l)
+  ) else
+    return (`Ok [])
 
 let write {base} path off buf =
-  match Fs_common.check_filename base (Filename.dirname path) with
-  | None -> return (`Error (`No_directory_entry (base, path)))
-  | Some path ->
-     create_directory path >>= fun () ->
-     match Fs_common.check_filename base path with
-     | None -> return (`Error (`No_directory_entry (base, path)))
-     | Some path ->
-        Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
-        catch
-          (fun () ->
-           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
-           let buf = Cstruct.to_string buf in
-           let rec aux off remaining =
-             if remaining = 0 then
-               Lwt_unix.close fd
-             else (
-               Lwt_unix.write fd buf off remaining >>= fun n ->
-               aux (off+n) (remaining-n))
-           in
-           aux 0 (String.length buf) >>= fun () ->
-           return (`Ok ()))
-          (fun e ->
-           Lwt_unix.close fd >>= fun () ->
-           return (`Error (`Unknown_error (Printexc.to_string e))))
+  let path = Fs_common.check_filename base (Filename.dirname path) in
+  create_directory path >>= fun () ->
+  let file = Fs_common.check_filename base path in
+  Lwt_unix.(openfile file [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
+  catch
+    (fun () ->
+     Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
+     let buf = Cstruct.to_string buf in
+     let rec aux off remaining =
+       if remaining = 0 then
+         Lwt_unix.close fd
+       else (
+         Lwt_unix.write fd buf off remaining >>= fun n ->
+         aux (off+n) (remaining-n))
+     in
+     aux 0 (String.length buf) >>= fun () ->
+     return (`Ok ()))
+    (fun e ->
+     Lwt_unix.close fd >>= fun () ->
+     return (`Error (`Unknown_error (Printexc.to_string e))))

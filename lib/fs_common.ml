@@ -36,54 +36,46 @@ let split_string delimiter name =
 let rec remove_dots parts outp =
   match parts, outp with
   | ".."::r, a::rt -> remove_dots r  rt
-  | ".."::r, []    -> None
+  | ".."::r, []    -> remove_dots r  []
   | "."::r , rt    -> remove_dots r  rt
   | r::rs  , rt    -> remove_dots rs (r :: rt)
-  | []     , rt    -> Some (List.rev rt)
+  | []     , rt    -> List.rev rt
 
 let normalise filename =
   let parts = split_string '/' filename in
-  match remove_dots parts [] with
-  | Some removed -> Some (String.concat "/" removed)
-  | None         -> None
+  remove_dots parts [] |> String.concat "/"
 
 let check_filename base name =
-  match normalise name with
-  | Some realname -> Some (Filename.concat base realname)
-  | None          -> None
+  Filename.concat base (normalise name)
 
 let read_impl base name off len =
   prerr_endline ("read: " ^ name);
-  match check_filename base name with
-  | None -> return (`Error (`Read_out_of_base_tried))
-  | Some fullname ->
-     try_lwt
-       Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
-       let st =
-         Lwt_stream.from (fun () ->
-           let buf = Cstruct.create 4096 in
-           lwt len = Lwt_cstruct.read fd buf in
-           match len with
-           | 0 ->
-              Lwt_unix.close fd
-              >>= fun () -> return None
-           | len ->
-              return (Some (Cstruct.sub buf 0 len))
-           )
-       in
-       Lwt_stream.to_list st >>= fun bufs ->
-       return (`Ok bufs)
-   with exn ->
-     return (`Error (`No_directory_entry (base, name)))
+  let fullname = check_filename base name in
+  try_lwt
+    Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
+    let st =
+      Lwt_stream.from (fun () ->
+        let buf = Cstruct.create 4096 in
+        lwt len = Lwt_cstruct.read fd buf in
+        match len with
+        | 0 ->
+           Lwt_unix.close fd
+           >>= fun () -> return None
+        | len ->
+           return (Some (Cstruct.sub buf 0 len))
+      )
+    in
+    Lwt_stream.to_list st >>= fun bufs ->
+    return (`Ok bufs)
+  with exn ->
+    return (`Error (`No_directory_entry (base, name)))
 
 let size_impl base name =
   prerr_endline ("size: " ^ name);
-  match check_filename base name with
-  | None -> return (`Error `Read_out_of_base_tried)
-  | Some fullname ->
-     try_lwt
-       Lwt_unix.LargeFile.stat fullname >>= fun stat ->
-       let size = stat.Lwt_unix.LargeFile.st_size in
-       return (`Ok size)
-     with exn ->
-       return (`Error (`No_directory_entry (base, name)))
+  let fullname = check_filename base name in
+  try_lwt
+    Lwt_unix.LargeFile.stat fullname >>= fun stat ->
+    let size = stat.Lwt_unix.LargeFile.st_size in
+    return (`Ok size)
+  with exn ->
+    return (`Error (`No_directory_entry (base, name)))
