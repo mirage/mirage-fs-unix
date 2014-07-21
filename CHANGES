@@ -1,4 +1,7 @@
-1.1.0: (2014-06-09)
+1.1.1 (2014-07-21):
+* Prohibit directory traversal outside of exposed base directory
+
+1.1.0 (2014-06-09):
 * Add an `FS_unix` module which implements `V1_LWT.FS`
 
 1.0.0 (2013-12-16):

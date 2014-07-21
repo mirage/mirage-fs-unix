@@ -1,6 +1,6 @@
 OASISFormat: 0.3
 Name:        mirage-fs-unix
-Version:     1.1.0
+Version:     1.1.1
 Synopsis:    Mirage filesystem driver for Unix
 Authors:     Anil Madhavapeddy, Thomas Gazagnaire
 License:     ISC
