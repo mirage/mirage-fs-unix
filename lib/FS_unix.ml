@@ -95,7 +95,7 @@ let rec create_directory path : unit Lwt.t =
   )
 
 let mkdir {base} path =
-  let path = Fs_common.check_filename base path in
+  let path = Fs_common.resolve_filename base path in
   create_directory path >|= fun () -> `Ok ()
 
 let command fmt =
@@ -112,17 +112,17 @@ let format {base} _ =
   command "rm -rf %s" base
 
 let destroy {base} path =
-  let path = Fs_common.check_filename base path in
+  let path = Fs_common.resolve_filename base path in
   command "rm -rf %s" path
 
 let create {base} path =
-  let path = Fs_common.check_filename base (Filename.dirname path) in
+  let path = Fs_common.resolve_filename base (Filename.dirname path) in
   create_directory path >>= fun () ->
-  let file = Fs_common.check_filename base (Filename.dirname path) in
+  let file = Fs_common.resolve_filename base (Filename.dirname path) in
   command "touch %s" file
 
 let stat {base} path0 =
-  let path = Fs_common.check_filename base path0 in
+  let path = Fs_common.resolve_filename base path0 in
   try_lwt
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     let size = stat.Lwt_unix.LargeFile.st_size in
@@ -134,7 +134,7 @@ let stat {base} path0 =
     return (`Error (`No_directory_entry (base, path0)))
 
 let listdir {base} path =
-  let path = Fs_common.check_filename base path in
+  let path = Fs_common.resolve_filename base path in
   if Sys.file_exists path then (
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
@@ -144,9 +144,9 @@ let listdir {base} path =
     return (`Ok [])
 
 let write {base} path off buf =
-  let path = Fs_common.check_filename base (Filename.dirname path) in
+  let path = Fs_common.resolve_filename base (Filename.dirname path) in
   create_directory path >>= fun () ->
-  let file = Fs_common.check_filename base path in
+  let file = Fs_common.resolve_filename base path in
   Lwt_unix.(openfile file [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
   catch
     (fun () ->

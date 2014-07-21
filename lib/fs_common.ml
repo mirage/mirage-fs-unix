@@ -41,16 +41,14 @@ let rec remove_dots parts outp =
   | r::rs  , rt    -> remove_dots rs (r :: rt)
   | []     , rt    -> List.rev rt
 
-let normalise filename =
+let resolve_filename base filename =
   let parts = split_string '/' filename in
-  remove_dots parts [] |> String.concat "/"
-
-let check_filename base name =
-  Filename.concat base (normalise name)
+  let name = remove_dots parts [] |> String.concat "/" in
+  Filename.concat base name
 
 let read_impl base name off len =
   prerr_endline ("read: " ^ name);
-  let fullname = check_filename base name in
+  let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
     let st =
@@ -72,7 +70,7 @@ let read_impl base name off len =
 
 let size_impl base name =
   prerr_endline ("size: " ^ name);
-  let fullname = check_filename base name in
+  let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.LargeFile.stat fullname >>= fun stat ->
     let size = stat.Lwt_unix.LargeFile.st_size in
