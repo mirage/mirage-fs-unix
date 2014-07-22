@@ -19,19 +19,17 @@
 open Lwt
 
 let split_string delimiter name =
-  let rec doit part acc =
+  let rec doit str len off acc =
     let open String in
-    let len = length part in
-    let idx = try index part delimiter with _ -> len in
-    let fst = sub part 0 idx in
+    let idx = try index_from str off delimiter with _ -> len in
+    let fst = sub str off (idx - off) in
     let idx' = idx + 1 in
     if idx' <= len then
-      let rt = sub part idx' (len - idx') in
-      doit rt (fst :: acc)
+      doit str len idx' (fst :: acc)
     else
       fst :: acc
   in
-  List.rev (doit name [])
+  List.rev (doit name (String.length name) 0 [])
 
 let rec remove_dots parts outp =
   match parts, outp with
