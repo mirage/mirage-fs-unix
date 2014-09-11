@@ -1,3 +1,6 @@
+1.1.2 (2014-09-11)
+* Fix quadratic behavior (#5)
+
 1.1.1 (2014-07-21):
 * Prohibit directory traversal outside of exposed base directory
 * Parent of base directory is base directory (/../ -> /)
