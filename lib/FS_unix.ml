@@ -116,10 +116,9 @@ let destroy {base} path =
   command "rm -rf %s" path
 
 let create {base} path =
-  let path = Fs_common.resolve_filename base (Filename.dirname path) in
-  create_directory path >>= fun () ->
-  let file = Fs_common.resolve_filename base (Filename.dirname path) in
-  command "touch %s" file
+  let path = Fs_common.resolve_filename base path in
+  create_directory (Filename.dirname path) >>= fun () ->
+  command "touch %s" path
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
@@ -144,10 +143,9 @@ let listdir {base} path =
     return (`Ok [])
 
 let write {base} path off buf =
-  let path = Fs_common.resolve_filename base (Filename.dirname path) in
-  create_directory path >>= fun () ->
-  let file = Fs_common.resolve_filename base path in
-  Lwt_unix.(openfile file [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
+  let path = Fs_common.resolve_filename base path in
+  create_directory (Filename.dirname path) >>= fun () ->
+  Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
   catch
     (fun () ->
      Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->

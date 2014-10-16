@@ -1,5 +1,5 @@
 # OPAM packages needed to build tests.
-OPAM_PACKAGES="lwt cstruct mirage-types"
+OPAM_PACKAGES="lwt cstruct.1.4.0 mirage-types"
 
 ppa=avsm/ocaml41+opam11
 echo "yes" | sudo add-apt-repository ppa:$ppa
