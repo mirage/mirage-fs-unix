@@ -24,3 +24,5 @@ include V1.FS
 
 val string_of_error: error -> string
 (** Pretty print errors. *)
+
+val connect : string -> [`Ok of t | `Error of error] io
