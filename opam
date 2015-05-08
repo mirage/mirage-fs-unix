@@ -12,5 +12,7 @@ depends: [
   "ocamlfind"
   "cstruct" {>= "1.4.0"}
   "mirage-types-lwt"
+  "mirage-clock-unix" {test}
+  "alcotest" {test}
 ]
 available: [ ocaml-version >= "4.01.0"]
