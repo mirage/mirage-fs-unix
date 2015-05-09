@@ -11,18 +11,22 @@ let connect_or_fail () =
   | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs; all tests will fail"
   | `Ok fs -> Lwt.return fs
 
-let test_connect () =
+let connect_present_dir () =
   connect_or_fail () >>= fun _fs -> Lwt.return_unit
 
 (* use the empty string as a proxy for "dirname that can't possibly already be there" *)
-let connect_to_empty_string () =
+let expect_error_connecting where () =
   FS_unix.connect "" >>= function
-  | `Ok fs -> OUnit.assert_failure "connect let us make an FS under empty string
-  directory"
+  | `Ok fs -> OUnit.assert_failure 
+                (Printf.sprintf "connect let us make an FS at %s" where)
   | `Error _ -> Lwt.return_unit (* TODO: not sure which error is appropriate
                                    here, but we should definitely be getting
                                    *some* kind of error or the types should
                                    reflect that this will always succeed *)
+
+let connect_to_empty_string = expect_error_connecting ""
+
+let connect_to_dev_null = expect_error_connecting "/dev/null"
 
 let read_nonexistent_file file () =
   connect_or_fail () >>= fun fs ->
@@ -122,13 +126,14 @@ let size_small_file () =
   FS_unix.size fs content_file >>= function
   | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
   | `Ok n -> OUnit.assert_equal ~msg:"size of a small file"
-               ~printer:Int64.to_string (Int64.of_int 13);
+               ~printer:Int64.to_string (Int64.of_int 13) n;
     Lwt.return_unit
 
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
-    "test_connect", `Quick, lwt_run test_connect;
+    "connect_to_dev_null", `Quick, lwt_run connect_to_dev_null;
+    "connect_present_dir", `Quick, lwt_run connect_present_dir;
   ] in
   let read = [ 
     "read_nonexistent_file_from_root", `Quick, 
@@ -143,9 +148,10 @@ let () =
     "read_big_file", `Quick, lwt_run read_big_file;
      *)
   ] in
-  let format = [ ] in
-  let create = [ ] in
-  let mkdir = [ ] in
+  let create = [ 
+
+  
+  ] in
   let destroy = [ ] in
   let size = [ 
     "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
@@ -155,8 +161,10 @@ let () =
     "size_big_file", `Quick, lwt_run size_big_file;
        *)
   ] in
+  let mkdir = [ ] in
   let listdir = [ ] in
   let write = [ ] in
+  let format = [ ] in
   Alcotest.run "FS_unix" [
     "connect", connect;
     "format", format;
