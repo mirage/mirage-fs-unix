@@ -97,6 +97,34 @@ let read_at_offset_past_eof () =
   | `Ok _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
   | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
 
+let size_nonexistent_file () =
+  connect_or_fail () >>= fun fs ->
+  let filename = "^#$\000not a file!!!. &;" in
+  FS_unix.size fs filename >>= function
+  | `Ok d -> 
+    OUnit.assert_failure (Printf.sprintf "Got a size of %s for absent file"
+                            (Int64.to_string d))
+  | `Error (`No_directory_entry (_, basename)) -> 
+    OUnit.assert_equal filename basename; 
+    Lwt.return_unit
+  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+
+let size_empty_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.size fs empty_file >>= function
+  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Ok n -> OUnit.assert_equal ~msg:"size of an empty file" 
+               ~printer:Int64.to_string (Int64.zero) n;
+    Lwt.return_unit
+
+let size_small_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.size fs content_file >>= function
+  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Ok n -> OUnit.assert_equal ~msg:"size of a small file"
+               ~printer:Int64.to_string (Int64.of_int 13);
+    Lwt.return_unit
+
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -119,7 +147,14 @@ let () =
   let create = [ ] in
   let mkdir = [ ] in
   let destroy = [ ] in
-  let stat = [ ] in
+  let size = [ 
+    "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
+    "size_empty_file", `Quick, lwt_run size_empty_file;
+    "size_small_file", `Quick, lwt_run size_small_file;
+    (*
+    "size_big_file", `Quick, lwt_run size_big_file;
+       *)
+  ] in
   let listdir = [ ] in
   let write = [ ] in
   Alcotest.run "FS_unix" [
@@ -129,7 +164,7 @@ let () =
     "read", read;
     "mkdir", mkdir;
     "destroy", destroy;
-    "stat", stat;
+    "size", size;
     "listdir", listdir;
     "write", write;
   ]
