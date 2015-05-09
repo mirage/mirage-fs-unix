@@ -1,6 +1,6 @@
 open Lwt
 
-let test_fs = "test_output"
+let test_fs = "_tests/test_directory"
 
 let lwt_run f () = Lwt_main.run (f ())
 
@@ -18,14 +18,58 @@ let connect_to_empty_string () =
   | `Ok fs -> OUnit.assert_failure "connect let us make an FS under empty string
   directory"
   | `Error _ -> Lwt.return_unit (* TODO: not sure which error is appropriate
-                                   here *)
+                                   here, but we should definitely be getting
+                                   *some* kind of error or the types should
+                                   reflect that this will always succeed *)
+
+let read_nonexistent_file file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.read fs file 0 1 >>= function
+    (* the only vaguely reasonable choices for an error here are
+       `No_directory_entry (which is a bit odd because we're asking for
+       something at the fs root) or maybe `Unknown_error, or at the outside
+       `Block_device *)
+  | `Ok _ ->
+    OUnit.assert_failure (Printf.sprintf "read returned `Ok for something that shouldn't have
+    been there. Please make sure there isn't actually a file named %s present" file)
+  | `Error `No_space | `Error (`Directory_not_empty _) 
+  | `Error (`Is_a_directory _) | `Error (`Not_a_directory _) 
+  | `Error (`File_already_exists _) -> 
+    OUnit.assert_failure "Unreasonable error response when trying to read a nonexistent file"
+  | `Error (`Unknown_error s) ->
+    let chastisement = Printf.sprintf "reading a nonexistent file returned
+    `Unknown_error: %s; please make the error nicer" s in
+    OUnit.assert_failure chastisement
+  | `Error (`Format_not_recognised _) | `Error (`Block_device _) ->
+    (* these would be quite odd for FS_unix, but they're not deserving of the level
+       of scorn above *)
+    OUnit.assert_failure "low-level when trying to test nonexistent file read"
+  | `Error (`No_directory_entry (_dirname, basename)) ->
+    (* from the implementation, it's clear that the first item in the tuple is
+       the name with which we invoked FS_unix.connect, but that's not obvious
+       from the documentation *)
+    (* it's not clear to me that including (and therefore exposing) the name
+       with which the fs was created is useful, so refusing to test it *)
+    OUnit.assert_equal ~msg:"does the error content make sense?" basename file;
+    Lwt.return_unit
 
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
     "test_connect", `Quick, lwt_run test_connect;
   ] in
-  let read = [ ] in
+  let read = [ 
+    "read_nonexistent_file_from_root", `Quick, 
+    lwt_run (read_nonexistent_file "^$@thing_that_isn't_in root!!!.space");
+    "read_nonexistent_file_from_dir", `Quick, 
+    lwt_run (read_nonexistent_file "not a *dir*?!?/thing_that_isn't_in root!!!.space");
+    (*
+    "read_empty_file", `Quick, lwt_run read_empty_file;
+    "read_big_file", `Quick, lwt_run read_big_file;
+    "read_zero_bytes", `Quick, lwt_run read_zero_bytes;
+    "read_at_offset", `Quick, lwt_run read_at_offset;
+     *)
+  ] in
   let format = [ ] in
   let create = [ ] in
   let mkdir = [ ] in
