@@ -1,6 +1,7 @@
 open Lwt
 
 let test_fs = "_tests/test_directory"
+let empty_file = "empty"
 
 let lwt_run f () = Lwt_main.run (f ())
 
@@ -53,6 +54,18 @@ let read_nonexistent_file file () =
     OUnit.assert_equal ~msg:"does the error content make sense?" basename file;
     Lwt.return_unit
 
+let read_empty_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.read fs empty_file 0 1 >>= function
+  | `Ok [] -> Lwt.return_unit
+  | `Ok bufs -> 
+    OUnit.assert_failure "reading an empty file returned some cstructs"
+  | `Error (`No_directory_entry _) ->
+    OUnit.assert_failure (Printf.sprintf "read failed for a present but empty file; please make
+      sure %s is present in the test filesystem" empty_file)
+  | `Error e -> OUnit.assert_failure (Printf.sprintf "Not the right error: %s"
+                     (FS_unix.string_of_error e))
+
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -63,8 +76,8 @@ let () =
     lwt_run (read_nonexistent_file "^$@thing_that_isn't_in root!!!.space");
     "read_nonexistent_file_from_dir", `Quick, 
     lwt_run (read_nonexistent_file "not a *dir*?!?/thing_that_isn't_in root!!!.space");
-    (*
     "read_empty_file", `Quick, lwt_run read_empty_file;
+    (*
     "read_big_file", `Quick, lwt_run read_big_file;
     "read_zero_bytes", `Quick, lwt_run read_zero_bytes;
     "read_at_offset", `Quick, lwt_run read_at_offset;
