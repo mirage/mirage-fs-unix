@@ -2,6 +2,7 @@ open Lwt
 
 let test_fs = "_tests/test_directory"
 let empty_file = "empty"
+let content_file = "content"
 
 let lwt_run f () = Lwt_main.run (f ())
 
@@ -64,7 +65,37 @@ let read_empty_file () =
     OUnit.assert_failure (Printf.sprintf "read failed for a present but empty file; please make
       sure %s is present in the test filesystem" empty_file)
   | `Error e -> OUnit.assert_failure (Printf.sprintf "Not the right error: %s"
-                     (FS_unix.string_of_error e))
+                                        (FS_unix.string_of_error e))
+
+let read_zero_bytes () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.read fs content_file 0 0 >>= function
+  | `Ok [] -> Lwt.return_unit
+  | `Ok bufs -> 
+    OUnit.assert_failure "reading zero bytes from a non-empty file returned some cstructs"
+  | `Error (`No_directory_entry _) ->
+    OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make
+      sure %s is present in the test filesystem" content_file)
+  | `Error e -> OUnit.assert_failure (Printf.sprintf "Not the right error: %s"
+                                        (FS_unix.string_of_error e))
+
+let read_at_offset () =
+  connect_or_fail () >>= fun fs ->
+  (* we happen to know that content_file is 13 bytes in size. *)
+  FS_unix.read fs content_file 1 12 >>= function
+  | `Ok [] -> OUnit.assert_failure "read returned an empty list for a non-empty file"
+  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Ok (buf :: []) ->
+    OUnit.assert_equal ~printer:(fun a -> a) "ome content" (Cstruct.to_string buf);
+    Lwt.return_unit
+  | `Ok bufs -> OUnit.assert_failure "got *way* too much back from reading a short file at offset 1"
+
+let read_at_offset_past_eof () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.read fs content_file 50 10 >>= function
+  | `Ok [] -> Lwt.return_unit
+  | `Ok _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
+  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
 
 let () =
   let connect = [ 
@@ -77,10 +108,11 @@ let () =
     "read_nonexistent_file_from_dir", `Quick, 
     lwt_run (read_nonexistent_file "not a *dir*?!?/thing_that_isn't_in root!!!.space");
     "read_empty_file", `Quick, lwt_run read_empty_file;
-    (*
-    "read_big_file", `Quick, lwt_run read_big_file;
     "read_zero_bytes", `Quick, lwt_run read_zero_bytes;
     "read_at_offset", `Quick, lwt_run read_at_offset;
+    "read_at_offset_past_eof", `Quick, lwt_run read_at_offset_past_eof;
+    (*
+    "read_big_file", `Quick, lwt_run read_big_file;
      *)
   ] in
   let format = [ ] in
