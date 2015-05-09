@@ -3,6 +3,7 @@ open Lwt
 let test_fs = "_tests/test_directory"
 let empty_file = "empty"
 let content_file = "content"
+let directory = "a_directory"
 
 let lwt_run f () = Lwt_main.run (f ())
 
@@ -23,6 +24,8 @@ let expect_error_connecting where () =
                                    here, but we should definitely be getting
                                    *some* kind of error or the types should
                                    reflect that this will always succeed *)
+
+let assert_fail e = OUnit.assert_failure (FS_unix.string_of_error e)
 
 let connect_to_empty_string = expect_error_connecting ""
 
@@ -68,8 +71,7 @@ let read_empty_file () =
   | `Error (`No_directory_entry _) ->
     OUnit.assert_failure (Printf.sprintf "read failed for a present but empty file; please make
       sure %s is present in the test filesystem" empty_file)
-  | `Error e -> OUnit.assert_failure (Printf.sprintf "Not the right error: %s"
-                                        (FS_unix.string_of_error e))
+  | `Error e -> assert_fail e
 
 let read_zero_bytes () =
   connect_or_fail () >>= fun fs ->
@@ -80,15 +82,14 @@ let read_zero_bytes () =
   | `Error (`No_directory_entry _) ->
     OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make
       sure %s is present in the test filesystem" content_file)
-  | `Error e -> OUnit.assert_failure (Printf.sprintf "Not the right error: %s"
-                                        (FS_unix.string_of_error e))
+  | `Error e -> assert_fail e
 
 let read_at_offset () =
   connect_or_fail () >>= fun fs ->
   (* we happen to know that content_file is 13 bytes in size. *)
   FS_unix.read fs content_file 1 12 >>= function
   | `Ok [] -> OUnit.assert_failure "read returned an empty list for a non-empty file"
-  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Error e -> assert_fail e
   | `Ok (buf :: []) ->
     OUnit.assert_equal ~printer:(fun a -> a) "ome content" (Cstruct.to_string buf);
     Lwt.return_unit
@@ -99,7 +100,7 @@ let read_at_offset_past_eof () =
   FS_unix.read fs content_file 50 10 >>= function
   | `Ok [] -> Lwt.return_unit
   | `Ok _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
-  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Error e -> assert_fail e
 
 let size_nonexistent_file () =
   connect_or_fail () >>= fun fs ->
@@ -111,12 +112,12 @@ let size_nonexistent_file () =
   | `Error (`No_directory_entry (_, basename)) -> 
     OUnit.assert_equal filename basename; 
     Lwt.return_unit
-  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Error e -> assert_fail e
 
 let size_empty_file () =
   connect_or_fail () >>= fun fs ->
   FS_unix.size fs empty_file >>= function
-  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Error e -> assert_fail e
   | `Ok n -> OUnit.assert_equal ~msg:"size of an empty file" 
                ~printer:Int64.to_string (Int64.zero) n;
     Lwt.return_unit
@@ -124,10 +125,91 @@ let size_empty_file () =
 let size_small_file () =
   connect_or_fail () >>= fun fs ->
   FS_unix.size fs content_file >>= function
-  | `Error e -> OUnit.assert_failure (FS_unix.string_of_error e)
+  | `Error e -> assert_fail e
   | `Ok n -> OUnit.assert_equal ~msg:"size of a small file"
                ~printer:Int64.to_string (Int64.of_int 13) n;
     Lwt.return_unit
+
+let size_a_directory () = 
+  connect_or_fail () >>= fun fs ->
+  FS_unix.size fs directory >>= function
+  | `Error (`Is_a_directory location) -> 
+    OUnit.assert_equal ~printer:(fun a -> a) directory location; Lwt.return_unit
+  | `Error e -> assert_fail e
+  | `Ok n -> OUnit.assert_failure 
+               (Printf.sprintf "got size %s on a directory" (Int64.to_string n))
+
+let mkdir_already_empty_directory () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs directory >>= function
+    (* TODO: the behaviour should really be a consistent *one* of these, 
+       but either is credible, at least if considering only their name *)
+  | `Error (`Is_a_directory _) | `Error (`File_already_exists _) -> Lwt.return_unit
+  | `Error e -> assert_fail e
+  | `Ok () -> OUnit.assert_failure 
+                "mkdir indicates no error when directory already present at requested path"
+
+let mkdir_over_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs empty_file >>= function
+  | `Error (`File_already_exists _) -> Lwt.return_unit
+  | `Error e -> assert_fail e
+  | `Ok () ->
+    (* really?  We're already in trouble, but let's see how bad it is *)
+    FS_unix.stat fs empty_file >>= function
+    | `Error e -> OUnit.assert_failure "mkdir reported success in making a
+    directory over an existing file, and now the location isn't even stat-able"
+    | `Ok s ->
+      let open FS_unix in
+      match s.directory with
+      | true -> OUnit.assert_failure "mkdir made a dir over top of an existing file"
+      | false -> 
+        OUnit.assert_failure "mkdir falsely reported success making a directory over an existing file"
+
+let mkdir_over_directory_with_contents () =
+  connect_or_fail () >>= fun fs ->
+  let tempdir = "mkdir_over_directory_with_contents" ^ (string_of_float
+                                                          (Clock.time ())) in
+  FS_unix.mkdir fs tempdir >>= function `Error e -> assert_fail e | `Ok () ->
+    FS_unix.mkdir fs (tempdir ^ "/cool tapes") >>= function
+    | `Error e -> assert_fail e | `Ok () ->
+      FS_unix.mkdir fs tempdir >>= function
+      | `Error (`Is_a_directory _) | `Error (`File_already_exists _) -> Lwt.return_unit
+      | `Error e -> assert_fail e
+      | `Ok () -> (* did we clobber the subdirectory that was here? *)
+        FS_unix.stat fs (tempdir ^ "/cool tapes") >>= function
+        | `Error (`No_directory_entry _) -> 
+          OUnit.assert_failure "mkdir silently clobbered an existing directory and all of
+          its contents.  That is bad.  Please fix it."
+        | `Error e -> assert_fail e
+        | `Ok s -> 
+          OUnit.assert_failure 
+            "mkdir claimed to clobber an existing directory, although it seems to actually have noop'd"
+
+let mkdir_in_path_not_present () =
+  let not_a_thing = "%%#@*%#@   \t\n/my awesome directory!!!" in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs not_a_thing >>= function
+  | `Ok () -> OUnit.assert_failure "reported success making a subdir of a dir that doesn't exist"
+  | `Error (`No_directory_entry _) -> Lwt.return_unit
+  | `Error e -> assert_fail e
+
+let mkdir_credibly () = 
+  let dirname = "mkdir_credibly-" ^ (string_of_float (Clock.time ())) in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs dirname >>= function
+  | `Error e -> assert_fail e
+  | `Ok () -> 
+    (* really? *)
+    FS_unix.stat fs dirname >>= function
+    | `Error `No_directory_entry _ -> 
+      OUnit.assert_failure "mkdir claimed success, but stat didn't see a dir there"
+    | `Error e -> assert_fail e
+    | `Ok s ->
+      let open FS_unix in
+      OUnit.assert_equal true s.directory;
+      OUnit.assert_equal dirname s.filename;
+      Lwt.return_unit
 
 let () =
   let connect = [ 
@@ -148,31 +230,45 @@ let () =
     "read_big_file", `Quick, lwt_run read_big_file;
      *)
   ] in
-  let create = [ 
-
-  
-  ] in
+  let create = [ ] in
   let destroy = [ ] in
   let size = [ 
     "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
     "size_empty_file", `Quick, lwt_run size_empty_file;
     "size_small_file", `Quick, lwt_run size_small_file;
+    "size_a_directory", `Quick, lwt_run size_a_directory;
     (*
     "size_big_file", `Quick, lwt_run size_big_file;
-       *)
+     *)
   ] in
-  let mkdir = [ ] in
+  let mkdir = [ 
+    "mkdir_credibly", `Quick, lwt_run mkdir_credibly; 
+    "mkdir_already_empty_directory", `Quick, lwt_run mkdir_already_empty_directory;
+    "mkdir_over_file", `Quick, lwt_run mkdir_over_file;
+    "mkdir_over_directory_with_contents", `Quick, lwt_run mkdir_over_directory_with_contents;
+    "mkdir_in_path_not_present", `Quick, lwt_run mkdir_in_path_not_present;
+  ] in
   let listdir = [ ] in
-  let write = [ ] in
+  let write = [ (*
+    "write_not_a_dir", `Quick, lwt_run write_not_a_dir;
+    "write_zero_bytes", `Quick, lwt_run write_zero_bytes;
+    "write_at_offset_within_file", `Quick, lwt_run write_at_offset_within_file;
+    "write_causing_truncate", `Quick, lwt_run write_causing_truncate;
+    "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
+    "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
+    "write_contents_correct", `Quick, lwt_run write_contents_correct;
+    "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
+                   *)
+  ] in
   let format = [ ] in
   Alcotest.run "FS_unix" [
     "connect", connect;
-    "format", format;
-    "create", create;
     "read", read;
+    "size", size;
     "mkdir", mkdir;
     "destroy", destroy;
-    "size", size;
+    "format", format;
+    "create", create;
     "listdir", listdir;
     "write", write;
   ]
