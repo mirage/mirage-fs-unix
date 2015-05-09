@@ -187,7 +187,7 @@ let mkdir_over_directory_with_contents () =
             "mkdir claimed to clobber an existing directory, although it seems to actually have noop'd"
 
 let mkdir_in_path_not_present () =
-  let not_a_thing = "%%#@*%#@   \t\n/my awesome directory!!!" in
+  let not_a_thing = "%%#@*%#@  $ /my awesome directory!!!" in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs not_a_thing >>= function
   | `Ok () -> OUnit.assert_failure "reported success making a subdir of a dir that doesn't exist"
