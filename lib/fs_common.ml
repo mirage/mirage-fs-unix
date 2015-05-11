@@ -50,7 +50,7 @@ let read_impl base name off len =
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
-    Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek ->
+    Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek -> (* very little we can do with _seek *)
     let st =
       Lwt_stream.from (fun () ->
         let buf = Cstruct.create 4096 in
