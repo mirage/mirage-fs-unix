@@ -24,6 +24,14 @@ let connect_present_dir () =
 let append_timestamp s =
   s ^ "-" ^ (string_of_float (Clock.time ()))
 
+let full_path dirname filename = dirname ^ "/" ^ filename
+
+let just_one_and_is expected read_bufs =
+  OUnit.assert_equal ~printer:string_of_int 1 (List.length read_bufs);
+  OUnit.assert_equal ~printer:(fun a -> a) 
+    expected (Cstruct.to_string (List.hd read_bufs));
+  Lwt.return read_bufs
+
 (* use the empty string as a proxy for "dirname that can't possibly already be there" *)
 let expect_error_connecting where () =
   FS_unix.connect "" >>= function
@@ -234,7 +242,7 @@ let mkdir_credibly () =
 let write_not_a_dir () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
-  let full_path = (dirname ^ "/" ^ subdir ^ "file") in
+  let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs dirname >>= function
   | `Error e -> assert_fail e
@@ -256,7 +264,7 @@ let write_not_a_dir () =
 let write_zero_bytes () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
-  let full_path = (dirname ^ "/" ^ subdir ^ "file") in
+  let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs dirname >>= function
   | `Error e -> assert_fail e
@@ -283,8 +291,7 @@ let write_zero_bytes () =
 
 let write_contents_correct () =
   let dirname = append_timestamp "write_contents_correct" in
-  let filename = "short_phrase" in
-  let full_path = dirname ^ "/" ^ filename in
+  let full_path = full_path dirname "short_phrase" in
   let phrase = "standing here on this frozen lake" in
   connect_or_fail () >>= fun fs ->
   (* note: this will succeed for create-on-write *)
@@ -308,7 +315,7 @@ let write_at_offset_within_file () =
   let preamble = "given this information, " in
   let boring = 
     "it seems apparent that under these circumstances, action is required" in
-  let full_path = dirname ^ "/" ^ filename in
+  let full_path = full_path dirname filename in
   FS_unix.write fs full_path 0 (Cstruct.of_string (preamble ^ boring))
   >>= do_or_fail >>= fun () ->
   let overwrite = "let's go ride bikes" in
@@ -325,16 +332,14 @@ let write_at_offset_within_file () =
 
 let write_causing_truncate () =
   let dirname = append_timestamp "write_causing_truncate" in
-  let full_path = dirname ^ "/" ^ "initially_contentful" in
+  let full_path = full_path dirname "initially_contentful" in
   let content = "repetition for its own sake." in
   connect_or_fail () >>= fun fs -> 
   FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
   FS_unix.write fs full_path 4 (Cstruct.create 0) >>= do_or_fail >>= fun () ->
   FS_unix.stat fs full_path >>= do_or_fail >>= fun s ->
   FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun read_bufs ->
-  OUnit.assert_equal ~printer:string_of_int 1 (List.length read_bufs);
-  OUnit.assert_equal ~printer:(fun a -> a) "repe" (Cstruct.to_string (List.hd
-                                                                        read_bufs));
+  just_one_and_is "repe" read_bufs >>= fun _ ->
   Lwt.return_unit
 
 let write_overwrite_dir () =
@@ -351,6 +356,32 @@ let write_overwrite_dir () =
     match s.directory with
     | true -> OUnit.assert_failure "write falsely reported success overwriting a directory"
     | false -> OUnit.assert_failure "write overwrite an entire directory!"
+
+let write_at_offset_is_eof () =
+  let dirname = append_timestamp "write_at_offset_is_eof" in
+  let filename = "database.sql" in
+  let full_path = full_path dirname filename in
+  let extant_data = "important record do not overwrite :)\n" in
+  let new_data = "some more super important data!\n" in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.write fs full_path 0 (Cstruct.of_string extant_data) 
+  >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path (String.length extant_data) (Cstruct.of_string new_data)
+  >>= do_or_fail >>= fun () ->
+  FS_unix.read fs full_path 0 
+    ((String.length extant_data) + String.length new_data)
+  >>= do_or_fail >>= just_one_and_is (extant_data ^ new_data) >>= fun _ ->
+  Lwt.return_unit
+
+let write_at_offset_beyond_eof () =
+  let dirname = append_timestamp "write_at_offset_beyond_eof" in
+  let filename = "database.sql" in
+  let full_path = full_path dirname filename in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.write fs full_path 0 (Cstruct.of_string "antici") >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path 10 (Cstruct.of_string "pation") >>= do_or_fail >>= fun () ->
+  FS_unix.read fs full_path 0 4096 >>= do_or_fail 
+  >>= just_one_and_is "anticipation" >>= fun _ -> Lwt.return_unit
 
 let () =
   let connect = [ 
@@ -400,10 +431,8 @@ let () =
     "write_at_offset_within_file", `Quick, lwt_run write_at_offset_within_file;
     "write_causing_truncate", `Quick, lwt_run write_causing_truncate;
     "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
-  (*
     "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
-                   *)
   ] in
   let format = [ ] in
   Alcotest.run "FS_unix" [
