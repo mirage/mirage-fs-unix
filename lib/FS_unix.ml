@@ -57,10 +57,6 @@ type t = {
   base: string
 }
 
-let connect id =
-  (* TODO verify base directory exists *)
-  return (`Ok { base=id })
-
 let disconnect t =
   return ()
 
@@ -131,6 +127,13 @@ let stat {base} path0 =
     return (`Ok { filename; read_only; directory; size })
   with exn ->
     return (`Error (`No_directory_entry (base, path0)))
+
+let connect id =
+  try_lwt
+    match Sys.is_directory id with
+    | true -> return (`Ok {base = id})
+    | false -> return (`Error (`Not_a_directory id))
+  with (Sys_error _) -> return (`Error (`No_directory_entry (id, "")))
 
 let listdir {base} path =
   let path = Fs_common.resolve_filename base path in
