@@ -114,14 +114,19 @@ let read_too_many_bytes () =
 
 let read_at_offset () =
   connect_or_fail () >>= fun fs ->
-  (* we happen to know that content_file is 13 bytes in size. *)
-  FS_unix.read fs content_file 1 12 >>= function
+  (* we happen to know that content_file is 14 bytes in size. *)
+  FS_unix.read fs content_file 1 13 >>= function
   | `Ok [] -> OUnit.assert_failure "read returned an empty list for a non-empty file"
   | `Error e -> assert_fail e
   | `Ok (buf :: []) ->
-    OUnit.assert_equal ~printer:(fun a -> a) "ome content" (Cstruct.to_string buf);
+    OUnit.assert_equal ~printer:(fun a -> Printf.sprintf "%S" a) "ome content\n" (Cstruct.to_string buf);
     Lwt.return_unit
   | `Ok bufs -> OUnit.assert_failure "got *way* too much back from reading a short file at offset 1"
+
+let read_subset_of_bytes () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.read fs content_file 0 4 >>= do_or_fail >>= just_one_and_is "some" >>=
+  fun _bufs -> Lwt.return_unit
 
 let read_at_offset_past_eof () =
   connect_or_fail () >>= fun fs ->
@@ -398,6 +403,7 @@ let () =
     "read_zero_bytes", `Quick, lwt_run read_zero_bytes;
     "read_too_many_bytes", `Quick, lwt_run read_too_many_bytes;
     "read_at_offset", `Quick, lwt_run read_at_offset;
+    "read_subset_of_bytes", `Quick, lwt_run read_subset_of_bytes;
     "read_at_offset_past_eof", `Quick, lwt_run read_at_offset_past_eof;
     (*
     "read_big_file", `Quick, lwt_run read_big_file;
