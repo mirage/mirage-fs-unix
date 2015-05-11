@@ -3,6 +3,7 @@ open Lwt
 let test_fs = "_tests/test_directory"
 let empty_file = "empty"
 let content_file = "content"
+let big_file = "big_file"
 let directory = "a_directory"
 
 let lwt_run f () = Lwt_main.run (f ())
@@ -135,6 +136,18 @@ let read_at_offset_past_eof () =
   | `Ok _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
   | `Error e -> assert_fail e
 
+let read_big_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.size fs big_file >>= do_or_fail >>= fun size ->
+  FS_unix.read fs big_file 0 10000 >>= function
+  | `Error e -> assert_fail e
+  | `Ok [] -> OUnit.assert_failure "read returned nothing for a large file"
+  | `Ok (hd::tl::[]) ->
+    OUnit.assert_equal ~printer:string_of_int (Int64.to_int size) 
+      ((Cstruct.len hd) + (Cstruct.len tl));
+    Lwt.return_unit
+  | `Ok _ -> OUnit.assert_failure "read didn't split a large file across pages as expected"
+
 let size_nonexistent_file () =
   connect_or_fail () >>= fun fs ->
   let filename = "^#$\000not a file!!!. &;" in
@@ -171,6 +184,12 @@ let size_a_directory () =
   | `Error e -> assert_fail e
   | `Ok n -> OUnit.assert_failure 
                (Printf.sprintf "got size %s on a directory" (Int64.to_string n))
+
+let size_big_file () =
+  connect_or_fail () >>= fun fs ->
+  FS_unix.size fs big_file >>= do_or_fail >>= fun size ->
+  OUnit.assert_equal ~printer:Int64.to_string (Int64.of_int 5000) size;
+  Lwt.return_unit
 
 let mkdir_already_empty_directory () =
   connect_or_fail () >>= fun fs ->
@@ -388,6 +407,33 @@ let write_at_offset_beyond_eof () =
   FS_unix.read fs full_path 0 4096 >>= do_or_fail 
   >>= just_one_and_is "anticipation" >>= fun _ -> Lwt.return_unit
 
+let write_big_file () =
+  let how_big = 4100 in
+  let dirname = append_timestamp "write_big_file" in
+  let full_path = full_path dirname "so many bytes!" in
+  let zero_cstruct cs = 
+    let zero c = Cstruct.set_char c 0 '\000' in
+    let i = Cstruct.iter (fun c -> Some 1) zero cs in
+    Cstruct.fold (fun b a -> b) i cs
+  in
+  let first_page = zero_cstruct (Cstruct.create how_big) in
+  Cstruct.set_char first_page 4097 'A';
+  Cstruct.set_char first_page 4098 'B';
+  Cstruct.set_char first_page 4099 'C';
+  connect_or_fail () >>= fun fs ->
+  FS_unix.write fs full_path 0 first_page >>= do_or_fail >>= fun () ->
+  FS_unix.size fs full_path >>= do_or_fail >>= fun sz ->
+  let check_chars buf a b c =
+    OUnit.assert_equal 'A' (Cstruct.get_char buf a);
+    OUnit.assert_equal 'B' (Cstruct.get_char buf b);
+    OUnit.assert_equal 'C' (Cstruct.get_char buf c)
+  in
+  OUnit.assert_equal ~printer:Int64.to_string (Int64.of_int how_big) sz;
+  FS_unix.read fs full_path 0 how_big >>= do_or_fail >>= function
+  | [] -> OUnit.assert_failure "claimed a big file was empty on read"
+  | _::buf::[]-> check_chars buf 1 2 3; Lwt.return_unit
+  | _ -> OUnit.assert_failure "read sent back a nonsensible number of buffers"
+
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -405,9 +451,7 @@ let () =
     "read_at_offset", `Quick, lwt_run read_at_offset;
     "read_subset_of_bytes", `Quick, lwt_run read_subset_of_bytes;
     "read_at_offset_past_eof", `Quick, lwt_run read_at_offset_past_eof;
-    (*
     "read_big_file", `Quick, lwt_run read_big_file;
-     *)
   ] in
   let create = [ ] in
   let destroy = [ ] in
@@ -416,9 +460,7 @@ let () =
     "size_empty_file", `Quick, lwt_run size_empty_file;
     "size_small_file", `Quick, lwt_run size_small_file;
     "size_a_directory", `Quick, lwt_run size_a_directory;
-    (*
     "size_big_file", `Quick, lwt_run size_big_file;
-     *)
   ] in
   let mkdir = [ 
     "mkdir_credibly", `Quick, lwt_run mkdir_credibly; 
@@ -439,6 +481,7 @@ let () =
     "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
     "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
+    "write_big_file", `Quick, lwt_run write_big_file;
   ] in
   let format = [ ] in
   Alcotest.run "FS_unix" [
