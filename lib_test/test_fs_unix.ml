@@ -21,6 +21,9 @@ let do_or_fail = function
 let connect_present_dir () =
   connect_or_fail () >>= fun _fs -> Lwt.return_unit
 
+let append_timestamp s =
+  s ^ "-" ^ (string_of_float (Clock.time ()))
+
 (* use the empty string as a proxy for "dirname that can't possibly already be there" *)
 let expect_error_connecting where () =
   FS_unix.connect "" >>= function
@@ -185,8 +188,7 @@ let mkdir_over_file () =
 
 let mkdir_over_directory_with_contents () =
   connect_or_fail () >>= fun fs ->
-  let tempdir = "mkdir_over_directory_with_contents" ^ (string_of_float
-                                                          (Clock.time ())) in
+  let tempdir = append_timestamp "mkdir_over_directory_with_contents" in
   FS_unix.mkdir fs tempdir >>= function `Error e -> assert_fail e | `Ok () ->
     FS_unix.mkdir fs (tempdir ^ "/cool tapes") >>= function
     | `Error e -> assert_fail e | `Ok () ->
@@ -212,7 +214,7 @@ let mkdir_in_path_not_present () =
   | `Error e -> assert_fail e
 
 let mkdir_credibly () = 
-  let dirname = "mkdir_credibly-" ^ (string_of_float (Clock.time ())) in
+  let dirname = append_timestamp "mkdir_credibly" in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs dirname >>= function
   | `Error e -> assert_fail e
@@ -230,7 +232,7 @@ let mkdir_credibly () =
 
 (* attempt to write within a dir that doesn't exist *)
 let write_not_a_dir () =
-  let dirname = "mkdir_not_a_dir-" ^ (string_of_float (Clock.time ())) in
+  let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
   let full_path = (dirname ^ "/" ^ subdir ^ "file") in
   connect_or_fail () >>= fun fs ->
@@ -252,7 +254,7 @@ let write_not_a_dir () =
         OUnit.assert_failure "Write to nonexistent dir runs mkdir -p"
 
 let write_zero_bytes () =
-  let dirname = "mkdir_not_a_dir-" ^ (string_of_float (Clock.time ())) in
+  let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
   let full_path = (dirname ^ "/" ^ subdir ^ "file") in
   connect_or_fail () >>= fun fs ->
@@ -280,7 +282,7 @@ let write_zero_bytes () =
                               ^ (FS_unix.string_of_error e))
 
 let write_contents_correct () =
-  let dirname = "write_contents_correct-" ^ (string_of_float (Clock.time ())) in
+  let dirname = append_timestamp "write_contents_correct" in
   let filename = "short_phrase" in
   let full_path = dirname ^ "/" ^ filename in
   let phrase = "standing here on this frozen lake" in
@@ -299,7 +301,7 @@ let write_contents_correct () =
       Lwt.return_unit
 
 let write_at_offset_within_file () =
-  let dirname = "mkdir_not_a_dir-" ^ (string_of_float (Clock.time ())) in
+  let dirname = append_timestamp "mkdir_not_a_dir" in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs dirname >>= do_or_fail >>= fun _ ->
   let filename = "content" in
@@ -320,6 +322,35 @@ let write_at_offset_within_file () =
     OUnit.assert_equal ~printer:(fun a -> a) (preamble ^ overwrite)
       (Cstruct.to_string buf);
     Lwt.return_unit
+
+let write_causing_truncate () =
+  let dirname = append_timestamp "write_causing_truncate" in
+  let full_path = dirname ^ "/" ^ "initially_contentful" in
+  let content = "repetition for its own sake." in
+  connect_or_fail () >>= fun fs -> 
+  FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path 4 (Cstruct.create 0) >>= do_or_fail >>= fun () ->
+  FS_unix.stat fs full_path >>= do_or_fail >>= fun s ->
+  FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun read_bufs ->
+  OUnit.assert_equal ~printer:string_of_int 1 (List.length read_bufs);
+  OUnit.assert_equal ~printer:(fun a -> a) "repe" (Cstruct.to_string (List.hd
+                                                                        read_bufs));
+  Lwt.return_unit
+
+let write_overwrite_dir () =
+  let dirname = append_timestamp "write_overwrite_dir" in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun () ->
+  FS_unix.write fs dirname 0 (Cstruct.of_string "noooooo") >>= function
+  | `Error (`Is_a_directory _) -> Lwt.return_unit
+  | `Error e -> assert_fail e
+  | `Ok () -> (* check to see whether it actually overwrote or just failed to
+                 return an error *)
+    FS_unix.stat fs dirname >>= do_or_fail >>= fun s ->
+    let open FS_unix in
+    match s.directory with
+    | true -> OUnit.assert_failure "write falsely reported success overwriting a directory"
+    | false -> OUnit.assert_failure "write overwrite an entire directory!"
 
 let () =
   let connect = [ 
@@ -367,11 +398,11 @@ let () =
     "write_zero_bytes", `Quick, lwt_run write_zero_bytes;
     "write_contents_correct", `Quick, lwt_run write_contents_correct;
     "write_at_offset_within_file", `Quick, lwt_run write_at_offset_within_file;
-  (*
     "write_causing_truncate", `Quick, lwt_run write_causing_truncate;
+    "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
+  (*
     "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
-    "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
                    *)
   ] in
   let format = [ ] in
