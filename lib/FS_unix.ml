@@ -160,21 +160,27 @@ let listdir {base} path =
 
 let write {base} path off buf =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun _ ->
-  Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
-  catch
-    (fun () ->
-     Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
-     let buf = Cstruct.to_string buf in
-     let rec aux off remaining =
-       if remaining = 0 then
-         Lwt_unix.close fd
-       else (
-         Lwt_unix.write fd buf off remaining >>= fun n ->
-         aux (off+n) (remaining-n))
-     in
-     aux 0 (String.length buf) >>= fun () ->
-     return (`Ok ()))
-    (fun e ->
-     Lwt_unix.close fd >>= fun () ->
-     return (`Error (`Unknown_error (Printexc.to_string e))))
+  create_directory (Filename.dirname path) >>= function
+  | `Error e -> Lwt.return (`Error e)
+  | `Ok () ->
+    try_lwt 
+      Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
+      catch
+        (fun () ->
+           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
+           let buf = Cstruct.to_string buf in
+           let rec aux off remaining =
+             if remaining = 0 then
+               Lwt_unix.close fd
+             else (
+               Lwt_unix.write fd buf off remaining >>= fun n ->
+               aux (off+n) (remaining-n))
+           in
+           aux 0 (String.length buf) >>= fun () ->
+           return (`Ok ()))
+        (fun e ->
+           Lwt_unix.close fd >>= fun () ->
+           return (`Error (`Unknown_error (Printexc.to_string e))))
+    with
+    | Unix.Unix_error (Unix.EISDIR, _, _) -> return (`Error (`Is_a_directory
+                                                               path))
