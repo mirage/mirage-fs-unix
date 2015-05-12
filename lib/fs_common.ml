@@ -45,7 +45,7 @@ let resolve_filename base filename =
   let name = remove_dots parts [] |> String.concat "/" in
   Filename.concat base name
 
-let read_impl base name off len =
+let read_impl base name off reqd_len =
   prerr_endline ("read: " ^ name);
   let fullname = resolve_filename base name in
   try_lwt
@@ -60,7 +60,7 @@ let read_impl base name off len =
            Lwt_unix.close fd
            >>= fun () -> return None
         | len ->
-           return (Some (Cstruct.sub buf 0 len))
+           return (Some (Cstruct.sub buf 0 (min len reqd_len)))
       )
     in
     Lwt_stream.to_list st >>= fun bufs ->
