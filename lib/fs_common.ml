@@ -64,7 +64,9 @@ let read_impl base name off reqd_len =
       )
     in
     Lwt_stream.to_list st >>= fun bufs ->
-    return (`Ok bufs)
+    match reqd_len with
+    | 0 -> return (`Ok [])
+    | n -> return (`Ok bufs)
   with exn ->
     return (`Error (`No_directory_entry (base, name)))
 
