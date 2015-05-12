@@ -63,14 +63,10 @@ let disconnect t =
 let id {base} = base
 
 let read {base} name off len =
-  Fs_common.read_impl base name off len >|= function
-   | `Error _ -> `Error (`No_directory_entry (base, name))
-   | `Ok data -> `Ok data
+  Fs_common.read_impl base name off len 
 
 let size {base} name =
-  Fs_common.size_impl base name >|= function
-   | `Error e -> `Error e
-   | `Ok data -> `Ok data
+  Fs_common.size_impl base name
 
 type stat = {
   filename: string;
@@ -164,13 +160,14 @@ let write {base} path off buf =
   | `Error e -> Lwt.return (`Error e)
   | `Ok () ->
     try_lwt 
-      Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
+      Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT] 0o644) >>= fun fd ->
       catch
         (fun () ->
-           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
+           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
            let buf = Cstruct.to_string buf in
            let rec aux off remaining =
              if remaining = 0 then
+               (* truncate *)
                Lwt_unix.close fd
              else (
                Lwt_unix.write fd buf off remaining >>= fun n ->
