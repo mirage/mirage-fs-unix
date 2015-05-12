@@ -79,20 +79,33 @@ type stat = {
   size: int64;
 }
 
-let rec create_directory path : unit Lwt.t =
-  if Sys.file_exists path then return_unit
-  else (
-    create_directory (Filename.dirname path) >>= fun () ->
-    if Sys.file_exists path then return_unit
-    else
-      catch
-        (fun () -> Lwt_unix.mkdir path 0o755)
-        (fun _  -> return_unit)
-  )
+(* all mkdirs are mkdir -p *)
+let rec create_directory path =
+  let check_type p =
+    Lwt_unix.LargeFile.stat path >>= fun stat ->
+    match stat.Lwt_unix.LargeFile.st_kind with
+    | Lwt_unix.S_DIR -> Lwt.return (`Ok ())
+    | _ -> Lwt.return (`Error (`File_already_exists path))
+  in
+  if Sys.file_exists path then check_type path
+  else begin
+    create_directory (Filename.dirname path) >>= function
+    | `Error e -> Lwt.return (`Error e) (* TODO: this leaks information *)
+    | `Ok () ->
+      try_lwt
+        Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (`Ok ())
+      with 
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> 
+        Lwt.return (`Error (`No_directory_entry (path, "")))
+      | Unix.Unix_error (Unix.ENOSPC, _, _) ->
+        Lwt.return (`Error (`No_space))
+      | Unix.Unix_error (Unix.EIO, _, _) ->
+        Lwt.return (`Error (`Block_device ()))
+  end
 
 let mkdir {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory path >|= fun () -> `Ok ()
+  create_directory path
 
 let command fmt =
   Printf.ksprintf (fun str ->
@@ -113,7 +126,7 @@ let destroy {base} path =
 
 let create {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun () ->
+  create_directory (Filename.dirname path) >>= fun _ ->
   command "touch %s" path
 
 let stat {base} path0 =
@@ -147,7 +160,7 @@ let listdir {base} path =
 
 let write {base} path off buf =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun () ->
+  create_directory (Filename.dirname path) >>= fun _ ->
   Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
   catch
     (fun () ->
