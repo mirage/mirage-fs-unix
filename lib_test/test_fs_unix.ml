@@ -33,15 +33,11 @@ let just_one_and_is expected read_bufs =
     expected (Cstruct.to_string (List.hd read_bufs));
   Lwt.return read_bufs
 
-(* use the empty string as a proxy for "dirname that can't possibly already be there" *)
 let expect_error_connecting where () =
   FS_unix.connect "" >>= function
+  | `Error _ -> Lwt.return_unit 
   | `Ok fs -> OUnit.assert_failure 
                 (Printf.sprintf "connect let us make an FS at %s" where)
-  | `Error _ -> Lwt.return_unit (* TODO: not sure which error is appropriate
-                                   here, but we should definitely be getting
-                                   *some* kind of error or the types should
-                                   reflect that this will always succeed *)
 
 let connect_to_empty_string = expect_error_connecting ""
 
@@ -50,13 +46,9 @@ let connect_to_dev_null = expect_error_connecting "/dev/null"
 let read_nonexistent_file file () =
   connect_or_fail () >>= fun fs ->
   FS_unix.read fs file 0 1 >>= function
-    (* the only vaguely reasonable choices for an error here are
-       `No_directory_entry (which is a bit odd because we're asking for
-       something at the fs root) or maybe `Unknown_error, or at the outside
-       `Block_device *)
   | `Ok _ ->
-    OUnit.assert_failure (Printf.sprintf "read returned `Ok for something that shouldn't have
-    been there. Please make sure there isn't actually a file named %s present" file)
+    OUnit.assert_failure ("read returned `Ok when no file was expected. 
+    Please make sure there isn't actually a file named %s" ^ file)
   | `Error `No_space | `Error (`Directory_not_empty _) 
   | `Error (`Is_a_directory _) | `Error (`Not_a_directory _) 
   | `Error (`File_already_exists _) -> 
@@ -66,15 +58,13 @@ let read_nonexistent_file file () =
     `Unknown_error: %s; please make the error nicer" s in
     OUnit.assert_failure chastisement
   | `Error (`Format_not_recognised _) | `Error (`Block_device _) ->
-    (* these would be quite odd for FS_unix, but they're not deserving of the level
-       of scorn above *)
     OUnit.assert_failure "low-level when trying to test nonexistent file read"
   | `Error (`No_directory_entry (_dirname, basename)) ->
     (* from the implementation, it's clear that the first item in the tuple is
        the name with which we invoked FS_unix.connect, but that's not obvious
        from the documentation *)
     (* it's not clear to me that including (and therefore exposing) the name
-       with which the fs was created is useful, so refusing to test it *)
+       with which the fs was created is useful or desirable, so don't test it *)
     OUnit.assert_equal ~msg:"does the error content make sense?" basename file;
     Lwt.return_unit
 
@@ -114,14 +104,8 @@ let read_too_many_bytes () =
 
 let read_at_offset () =
   connect_or_fail () >>= fun fs ->
-  (* we happen to know that content_file is 14 bytes in size. *)
-  FS_unix.read fs content_file 1 13 >>= function
-  | `Ok [] -> OUnit.assert_failure "read returned an empty list for a non-empty file"
-  | `Error e -> assert_fail e
-  | `Ok (buf :: []) ->
-    OUnit.assert_equal ~printer:(fun a -> Printf.sprintf "%S" a) "ome content\n" (Cstruct.to_string buf);
-    Lwt.return_unit
-  | `Ok bufs -> OUnit.assert_failure "got *way* too much back from reading a short file at offset 1"
+  FS_unix.read fs content_file 1 20 >>= do_or_fail >>= 
+  just_one_and_is "ome content\n" >>= fun _ -> Lwt.return_unit
 
 let read_subset_of_bytes () =
   connect_or_fail () >>= fun fs ->
@@ -130,10 +114,9 @@ let read_subset_of_bytes () =
 
 let read_at_offset_past_eof () =
   connect_or_fail () >>= fun fs ->
-  FS_unix.read fs content_file 50 10 >>= function
-  | `Ok [] -> Lwt.return_unit
-  | `Ok _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
-  | `Error e -> assert_fail e
+  FS_unix.read fs content_file 50 10 >>= do_or_fail >>= function
+  | [] -> Lwt.return_unit
+  | _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
 
 let read_big_file () =
   connect_or_fail () >>= fun fs ->
@@ -161,19 +144,15 @@ let size_nonexistent_file () =
 
 let size_empty_file () =
   connect_or_fail () >>= fun fs ->
-  FS_unix.size fs empty_file >>= function
-  | `Error e -> assert_fail e
-  | `Ok n -> OUnit.assert_equal ~msg:"size of an empty file" 
-               ~printer:Int64.to_string (Int64.zero) n;
-    Lwt.return_unit
+  FS_unix.size fs empty_file >>= do_or_fail >>= fun n ->
+  OUnit.assert_equal ~msg:"size of an empty file" ~printer:Int64.to_string (Int64.zero) n;
+  Lwt.return_unit
 
 let size_small_file () =
   connect_or_fail () >>= fun fs ->
-  FS_unix.size fs content_file >>= function
-  | `Error e -> assert_fail e
-  | `Ok n -> OUnit.assert_equal ~msg:"size of a small file"
-               ~printer:Int64.to_string (Int64.of_int 13) n;
-    Lwt.return_unit
+  FS_unix.size fs content_file >>= do_or_fail >>= fun n ->
+  OUnit.assert_equal ~msg:"size of a small file" ~printer:Int64.to_string (Int64.of_int 13) n;
+  Lwt.return_unit
 
 let size_a_directory () = 
   connect_or_fail () >>= fun fs ->
@@ -214,19 +193,18 @@ let mkdir_over_file () =
 let mkdir_over_directory_with_contents () =
   connect_or_fail () >>= fun fs ->
   let tempdir = append_timestamp "mkdir_over_directory_with_contents" in
-  FS_unix.mkdir fs tempdir >>= function `Error e -> assert_fail e | `Ok () ->
-    FS_unix.mkdir fs (tempdir ^ "/cool tapes") >>= function
-    | `Error e -> assert_fail e | `Ok () ->
-      FS_unix.mkdir fs tempdir >>= function
-      | `Error (`Is_a_directory _) | `Error (`File_already_exists _) -> Lwt.return_unit
-      | `Error e -> assert_fail e
-      | `Ok () -> (* did we clobber the subdirectory that was here? *)
-        FS_unix.stat fs (tempdir ^ "/cool tapes") >>= function
-        | `Error (`No_directory_entry _) -> 
-          OUnit.assert_failure "mkdir silently clobbered an existing directory and all of
+  FS_unix.mkdir fs tempdir >>= do_or_fail >>= fun () ->
+  FS_unix.mkdir fs (tempdir ^ "/cool tapes") >>= do_or_fail >>= fun () ->
+  FS_unix.mkdir fs tempdir >>= function
+  | `Error (`Is_a_directory _) | `Error (`File_already_exists _) -> Lwt.return_unit
+  | `Error e -> assert_fail e
+  | `Ok () -> (* did we clobber the subdirectory that was here? *)
+    FS_unix.stat fs (tempdir ^ "/cool tapes") >>= function
+    | `Error (`No_directory_entry _) -> 
+      OUnit.assert_failure "mkdir silently clobbered an existing directory and all of
           its contents.  That is bad.  Please fix it."
-        | `Error e -> assert_fail e
-        | `Ok s -> Lwt.return_unit
+    | `Error e -> assert_fail e
+    | `Ok s -> Lwt.return_unit
 
 let mkdir_in_path_not_present () =
   let not_a_thing = "%%#@*%#@  $ /my awesome directory!!!" in
@@ -236,19 +214,12 @@ let mkdir_in_path_not_present () =
 let mkdir_credibly () = 
   let dirname = append_timestamp "mkdir_credibly" in
   connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs dirname >>= function
-  | `Error e -> assert_fail e
-  | `Ok () -> 
-    (* really? *)
-    FS_unix.stat fs dirname >>= function
-    | `Error `No_directory_entry _ -> 
-      OUnit.assert_failure "mkdir claimed success, but stat didn't see a dir there"
-    | `Error e -> assert_fail e
-    | `Ok s ->
-      let open FS_unix in
-      OUnit.assert_equal true s.directory;
-      OUnit.assert_equal dirname s.filename;
-      Lwt.return_unit
+  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun () ->
+  FS_unix.stat fs dirname >>= do_or_fail >>= fun s ->
+  let open FS_unix in
+  OUnit.assert_equal true s.directory;
+  OUnit.assert_equal dirname s.filename;
+  Lwt.return_unit
 
 let write_not_a_dir () =
   let dirname = append_timestamp "write_not_a_dir" in
@@ -256,91 +227,65 @@ let write_not_a_dir () =
   let content = "puppies" in
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs dirname >>= function
-  | `Error e -> assert_fail e
-  | `Ok () -> 
-    FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
-    FS_unix.stat fs full_path >>= function
-    | `Error (`No_directory_entry _) -> 
-      OUnit.assert_failure "Write to a nonexistent dir falsely claimed success"
-    | `Error e -> 
-      OUnit.assert_failure ("Write to nonexistent dir claimed success, but
+  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
+  FS_unix.stat fs full_path >>= function
+  | `Error (`No_directory_entry _) -> 
+    OUnit.assert_failure "Write to a nonexistent dir falsely claimed success"
+  | `Error e -> 
+    OUnit.assert_failure ("Write to nonexistent dir claimed success, but
         attempting to stat gives " ^ (FS_unix.string_of_error e))
-    | `Ok stat -> 
-      FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun bufs ->
-      OUnit.assert_equal 1 (List.length bufs);
-      OUnit.assert_equal ~printer:(fun a -> a) content (Cstruct.to_string
-                                                          (List.hd bufs));
-      Lwt.return_unit
+  | `Ok stat -> 
+    FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun bufs ->
+    OUnit.assert_equal 1 (List.length bufs);
+    OUnit.assert_equal ~printer:(fun a -> a) content (Cstruct.to_string
+                                                        (List.hd bufs));
+    Lwt.return_unit
 
 let write_zero_bytes () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs dirname >>= function
-  | `Error e -> assert_fail e
-  | `Ok () ->
-    FS_unix.write fs full_path 0 (Cstruct.create 0) >>= function
-    | `Error (`No_directory_entry _) ->
-      (* if `write` doesn't imply `create`, this is the passing case *)
-      OUnit.assert_failure "Write of 0 bytes to a file that doesn't already exist failed"
-    | `Error e -> assert_fail e
-    | `Ok () ->
-      let open FS_unix in
-      (* TODO: if `write` isn't supposed to implicitly call "create" on files
-         that aren't already there, this behaviour is an error *)
-      (* make sure it's size 0 *)
-      FS_unix.stat fs full_path >>= function
-      | `Ok stat -> 
-        OUnit.assert_equal ~printer:Int64.to_string Int64.zero stat.size;
-        Lwt.return_unit
-      | `Error (`No_directory_entry _) -> 
-        OUnit.assert_failure "write claimed to create a file that the fs then couldn't find"
-      | `Error e -> 
-        OUnit.assert_failure ("write claimed to create a file, but trying to stat it produces " 
-                              ^ (FS_unix.string_of_error e))
+  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path 0 (Cstruct.create 0) >>= do_or_fail >>= fun () ->
+  let open FS_unix in
+  (* make sure it's size 0 *)
+  FS_unix.stat fs full_path >>= function
+  | `Ok stat -> 
+    OUnit.assert_equal ~printer:Int64.to_string Int64.zero stat.size;
+    Lwt.return_unit
+  | `Error (`No_directory_entry _) -> 
+    OUnit.assert_failure "write claimed to create a file that the fs then couldn't find"
+  | `Error e -> 
+    OUnit.assert_failure ("write claimed to create a file, but trying to stat it produces " 
+                          ^ (FS_unix.string_of_error e))
 
 let write_contents_correct () =
   let dirname = append_timestamp "write_contents_correct" in
   let full_path = full_path dirname "short_phrase" in
   let phrase = "standing here on this frozen lake" in
   connect_or_fail () >>= fun fs ->
-  (* note: this will succeed for create-on-write *)
-  FS_unix.write fs full_path 0 (Cstruct.of_string phrase) >>= function
-  | `Error e -> assert_fail e
-  | `Ok () ->
-    FS_unix.read fs full_path 0 (String.length phrase) >>= function 
-    | `Error e -> assert_fail e
-    | `Ok [] -> OUnit.assert_failure "write seems to have made an empty file,
-        even though we sent it some content"
-    | `Ok (buf1::buf2::_) -> OUnit.assert_failure "write wrote *way* more data than it was given"
-    | `Ok (buf::[]) ->
-      OUnit.assert_equal ~printer:(fun a -> a) phrase (Cstruct.to_string buf);
-      Lwt.return_unit
+  FS_unix.write fs full_path 0 (Cstruct.of_string phrase) >>= do_or_fail >>= fun () ->
+  FS_unix.read fs full_path 0 (String.length phrase) >>= do_or_fail >>=
+  just_one_and_is phrase >>= fun _ -> Lwt.return_unit
 
 let write_at_offset_within_file () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
-  connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun _ ->
-  let filename = "content" in
+  let full_path = full_path dirname "content" in
   let preamble = "given this information, " in
-  let boring = 
-    "it seems clear that under these circumstances, action is required" in
-  let full_path = full_path dirname filename in
+  let boring = "action is required." in
+  let better_idea = "let's go ride bikes" in
+  connect_or_fail () >>= fun fs ->
+  FS_unix.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_unix.write fs full_path 0 (Cstruct.of_string (preamble ^ boring))
   >>= do_or_fail >>= fun () ->
-  let overwrite = "let's go ride bikes" in
-  FS_unix.write fs full_path (String.length preamble) (Cstruct.of_string overwrite)
+  FS_unix.write fs full_path (String.length preamble) (Cstruct.of_string
+                                                         better_idea)
   >>= do_or_fail >>= fun () ->
-  FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= function
-  | [] -> OUnit.assert_failure "attempting to overwrite part of a file resulted in an empty file"
-  | b1::b2::_ -> OUnit.assert_failure "attempting to overwrite part of a file
-  resulted in a file that's *way* too big to be sensible"
-  | buf::[] -> 
-    OUnit.assert_equal ~printer:(fun a -> a) (preamble ^ overwrite)
-      (Cstruct.to_string buf);
-    Lwt.return_unit
+  FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun read_bufs ->
+  just_one_and_is (preamble ^ better_idea) read_bufs >>= fun _ -> 
+  Lwt.return_unit
 
 let write_at_offset_past_eof () =
   let dirname = append_timestamp "write_at_offset_past_eof" in
@@ -372,8 +317,7 @@ let write_overwrite_dir () =
 
 let write_at_offset_is_eof () =
   let dirname = append_timestamp "write_at_offset_is_eof" in
-  let filename = "database.sql" in
-  let full_path = full_path dirname filename in
+  let full_path = full_path dirname "database.sql" in
   let extant_data = "important record do not overwrite :)\n" in
   let new_data = "some more super important data!\n" in
   connect_or_fail () >>= fun fs ->
@@ -459,8 +403,6 @@ let () =
     "mkdir_in_path_not_present", `Quick, lwt_run mkdir_in_path_not_present;
   ] in
   let listdir = [ ] in
-  (* TODO: documentation should be explicit about create-on-write, overwrite,
-     etc *)
   let write = [ 
     "write_not_a_dir", `Quick, lwt_run write_not_a_dir;
     "write_zero_bytes", `Quick, lwt_run write_zero_bytes;
