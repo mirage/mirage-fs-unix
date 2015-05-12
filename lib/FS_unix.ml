@@ -69,7 +69,7 @@ let read {base} name off len =
 
 let size {base} name =
   Fs_common.size_impl base name >|= function
-   | `Error _ -> `Error (`No_directory_entry (base, name))
+   | `Error e -> `Error e
    | `Ok data -> `Ok data
 
 type stat = {

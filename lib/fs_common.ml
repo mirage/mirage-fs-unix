@@ -73,7 +73,12 @@ let size_impl base name =
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.LargeFile.stat fullname >>= fun stat ->
-    let size = stat.Lwt_unix.LargeFile.st_size in
-    return (`Ok size)
-  with exn ->
-    return (`Error (`No_directory_entry (base, name)))
+    match stat.Lwt_unix.LargeFile.st_kind with
+      | Lwt_unix.S_REG -> return (`Ok stat.Lwt_unix.LargeFile.st_size)
+      | _ -> return (`Error (`Is_a_directory name))
+  with 
+    | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      return (`Error (`No_directory_entry (base, name)))
+    | Unix.Unix_error (_, str1, str2) -> 
+      return (`Error (`Unknown_error (str1 ^ str2)))
+
