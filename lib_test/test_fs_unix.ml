@@ -93,7 +93,7 @@ let read_zero_bytes () =
   connect_or_fail () >>= fun fs ->
   FS_unix.read fs content_file 0 0 >>= function
   | `Ok [] -> Lwt.return_unit
-  | `Ok bufs -> 
+  | `Ok bufs ->
     OUnit.assert_failure "reading zero bytes from a non-empty file returned some cstructs"
   | `Error (`No_directory_entry _) ->
     OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make
@@ -193,13 +193,7 @@ let size_big_file () =
 
 let mkdir_already_empty_directory () =
   connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs directory >>= function
-    (* TODO: the behaviour should really be a consistent *one* of these, 
-       but either is credible, at least if considering only their name *)
-  | `Error (`Is_a_directory _) | `Error (`File_already_exists _) -> Lwt.return_unit
-  | `Error e -> assert_fail e
-  | `Ok () -> OUnit.assert_failure 
-                "mkdir indicates no error when directory already present at requested path"
+  FS_unix.mkdir fs directory >>= do_or_fail >>= fun () -> Lwt.return_unit
 
 let mkdir_over_file () =
   connect_or_fail () >>= fun fs ->
@@ -233,17 +227,12 @@ let mkdir_over_directory_with_contents () =
           OUnit.assert_failure "mkdir silently clobbered an existing directory and all of
           its contents.  That is bad.  Please fix it."
         | `Error e -> assert_fail e
-        | `Ok s -> 
-          OUnit.assert_failure 
-            "mkdir claimed to clobber an existing directory, although it seems to actually have noop'd"
+        | `Ok s -> Lwt.return_unit
 
 let mkdir_in_path_not_present () =
   let not_a_thing = "%%#@*%#@  $ /my awesome directory!!!" in
   connect_or_fail () >>= fun fs ->
-  FS_unix.mkdir fs not_a_thing >>= function
-  | `Ok () -> OUnit.assert_failure "reported success making a subdir of a dir that doesn't exist"
-  | `Error (`No_directory_entry _) -> Lwt.return_unit
-  | `Error e -> assert_fail e
+  FS_unix.mkdir fs not_a_thing >>= do_or_fail >>= fun () -> Lwt.return_unit
 
 let mkdir_credibly () = 
   let dirname = append_timestamp "mkdir_credibly" in
@@ -262,28 +251,28 @@ let mkdir_credibly () =
       OUnit.assert_equal dirname s.filename;
       Lwt.return_unit
 
-(* attempt to write within a dir that doesn't exist *)
 let write_not_a_dir () =
-  let dirname = append_timestamp "mkdir_not_a_dir" in
+  let dirname = append_timestamp "write_not_a_dir" in
   let subdir = "not there" in
+  let content = "puppies" in
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   connect_or_fail () >>= fun fs ->
   FS_unix.mkdir fs dirname >>= function
   | `Error e -> assert_fail e
   | `Ok () -> 
-    FS_unix.write fs full_path 0 (Cstruct.of_string "puppies") >>= function
-    | `Error (`No_directory_entry _) -> Lwt.return_unit
-    | `Error e -> assert_fail e
-    | `Ok () -> 
-      (* shouldn't have happened; false report of success, or unexpected mkdir?  *)
-      FS_unix.stat fs full_path >>= function
-      | `Error (`No_directory_entry _) -> 
-        OUnit.assert_failure "Write to a nonexistent dir falsely claimed success"
-      | `Error e -> 
-        OUnit.assert_failure ("Write to nonexistent dir claimed success, but
+    FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
+    FS_unix.stat fs full_path >>= function
+    | `Error (`No_directory_entry _) -> 
+      OUnit.assert_failure "Write to a nonexistent dir falsely claimed success"
+    | `Error e -> 
+      OUnit.assert_failure ("Write to nonexistent dir claimed success, but
         attempting to stat gives " ^ (FS_unix.string_of_error e))
-      | `Ok stat -> 
-        OUnit.assert_failure "Write to nonexistent dir runs mkdir -p"
+    | `Ok stat -> 
+      FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun bufs ->
+      OUnit.assert_equal 1 (List.length bufs);
+      OUnit.assert_equal ~printer:(fun a -> a) content (Cstruct.to_string
+                                                          (List.hd bufs));
+      Lwt.return_unit
 
 let write_zero_bytes () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
@@ -338,7 +327,7 @@ let write_at_offset_within_file () =
   let filename = "content" in
   let preamble = "given this information, " in
   let boring = 
-    "it seems apparent that under these circumstances, action is required" in
+    "it seems clear that under these circumstances, action is required" in
   let full_path = full_path dirname filename in
   FS_unix.write fs full_path 0 (Cstruct.of_string (preamble ^ boring))
   >>= do_or_fail >>= fun () ->
@@ -354,16 +343,17 @@ let write_at_offset_within_file () =
       (Cstruct.to_string buf);
     Lwt.return_unit
 
-let write_causing_truncate () =
-  let dirname = append_timestamp "write_causing_truncate" in
+let write_at_offset_past_eof () =
+  let dirname = append_timestamp "write_at_offset_past_eof" in
   let full_path = full_path dirname "initially_contentful" in
   let content = "repetition for its own sake." in
+  let replacement = "ating yourself is super fun!" in
   connect_or_fail () >>= fun fs -> 
   FS_unix.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
-  FS_unix.write fs full_path 4 (Cstruct.create 0) >>= do_or_fail >>= fun () ->
+  FS_unix.write fs full_path 4 (Cstruct.of_string replacement) >>= do_or_fail >>= fun () ->
   FS_unix.stat fs full_path >>= do_or_fail >>= fun s ->
   FS_unix.read fs full_path 0 4096 >>= do_or_fail >>= fun read_bufs ->
-  just_one_and_is "repe" read_bufs >>= fun _ ->
+  just_one_and_is ("repe" ^ replacement) read_bufs >>= fun _ ->
   Lwt.return_unit
 
 let write_overwrite_dir () =
@@ -405,7 +395,7 @@ let write_at_offset_beyond_eof () =
   FS_unix.write fs full_path 0 (Cstruct.of_string "antici") >>= do_or_fail >>= fun () ->
   FS_unix.write fs full_path 10 (Cstruct.of_string "pation") >>= do_or_fail >>= fun () ->
   FS_unix.read fs full_path 0 4096 >>= do_or_fail 
-  >>= just_one_and_is "anticipation" >>= fun _ -> Lwt.return_unit
+  >>= just_one_and_is "antici\000\000\000\000pation" >>= fun _ -> Lwt.return_unit
 
 let write_big_file () =
   let how_big = 4100 in
@@ -477,7 +467,7 @@ let () =
     "write_zero_bytes", `Quick, lwt_run write_zero_bytes;
     "write_contents_correct", `Quick, lwt_run write_contents_correct;
     "write_at_offset_within_file", `Quick, lwt_run write_at_offset_within_file;
-    "write_causing_truncate", `Quick, lwt_run write_causing_truncate;
+    "write_at_offset_past_eof", `Quick, lwt_run write_at_offset_past_eof;
     "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
     "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
