@@ -103,7 +103,6 @@ let read_zero_bytes () =
 let read_too_many_bytes () =
   connect_or_fail () >>= fun fs ->
   FS_unix.read fs content_file 0 65535 >>= function
-  | `Ok [] -> Lwt.return_unit
   | `Ok bufs -> 
     OUnit.assert_equal ~printer:string_of_int 1 (List.length bufs);
     OUnit.assert_equal ~printer:string_of_int 13 (Cstruct.len (List.hd bufs));
