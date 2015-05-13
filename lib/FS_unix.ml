@@ -90,13 +90,8 @@ let rec create_directory path =
     | `Ok () ->
       try_lwt
         Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (`Ok ())
-      with 
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> 
-        Lwt.return (`Error (`No_directory_entry (path, "")))
-      | Unix.Unix_error (Unix.ENOSPC, _, _) ->
-        Lwt.return (`Error (`No_space))
-      | Unix.Unix_error (Unix.EIO, _, _) ->
-        Lwt.return (`Error (`Block_device ()))
+      with Unix.Unix_error (ex, _, _) ->
+        return (Fs_common.map_error ex path)
   end
 
 let mkdir {base} path =
@@ -134,8 +129,8 @@ let stat {base} path0 =
     let read_only = false in
     let directory = Sys.is_directory path in
     return (`Ok { filename; read_only; directory; size })
-  with exn ->
-    return (`Error (`No_directory_entry (base, path0)))
+  with Unix.Unix_error (ex, _, _) ->
+    return (Fs_common.map_error ex path)
 
 let connect id =
   try_lwt
@@ -167,7 +162,6 @@ let write {base} path off buf =
            let buf = Cstruct.to_string buf in
            let rec aux off remaining =
              if remaining = 0 then
-               (* truncate *)
                Lwt_unix.close fd
              else (
                Lwt_unix.write fd buf off remaining >>= fun n ->
@@ -177,7 +171,9 @@ let write {base} path off buf =
            return (`Ok ()))
         (fun e ->
            Lwt_unix.close fd >>= fun () ->
-           return (`Error (`Unknown_error (Printexc.to_string e))))
+           match e with
+           | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+           | e -> Lwt.fail e
+        )
     with
-    | Unix.Unix_error (Unix.EISDIR, _, _) -> return (`Error (`Is_a_directory
-                                                               path))
+    | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
