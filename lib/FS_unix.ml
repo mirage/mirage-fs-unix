@@ -117,8 +117,10 @@ let destroy {base} path =
 
 let create {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun _ ->
-  command "touch %s" path
+  create_directory (Filename.dirname path) >>= function
+  | `Error e -> Lwt.return (`Error e)
+  | `Ok () ->
+    command "touch %s" path
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
