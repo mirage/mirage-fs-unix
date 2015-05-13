@@ -45,8 +45,18 @@ let resolve_filename base filename =
   let name = remove_dots parts [] |> String.concat "/" in
   Filename.concat base name
 
+let map_error err reqd_string = 
+  match err with
+  | Unix.EEXIST -> `Error (`File_already_exists reqd_string)
+  | Unix.EISDIR -> `Error (`Is_a_directory reqd_string)
+  | Unix.ENOENT -> `Error (`No_directory_entry ("", reqd_string))
+  | Unix.ENOSPC -> `Error `No_space
+  | Unix.ENOTDIR -> `Error (`Not_a_directory reqd_string)
+  | Unix.ENOTEMPTY -> `Error (`Directory_not_empty reqd_string)
+  | Unix.EUNKNOWNERR i -> `Error (`Unknown_error 
+                                    (reqd_string ^ ": error " ^ string_of_int i))
+
 let read_impl base name off reqd_len =
-  prerr_endline ("read: " ^ name);
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
@@ -67,20 +77,13 @@ let read_impl base name off reqd_len =
     match reqd_len with
     | 0 -> return (`Ok [])
     | n -> return (`Ok bufs)
-  with exn ->
-    return (`Error (`No_directory_entry (base, name)))
+  with Unix.Unix_error (ex, _, _) -> return (map_error ex name)
 
 let size_impl base name =
-  prerr_endline ("size: " ^ name);
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.LargeFile.stat fullname >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
       | Lwt_unix.S_REG -> return (`Ok stat.Lwt_unix.LargeFile.st_size)
       | _ -> return (`Error (`Is_a_directory name))
-  with 
-    | Unix.Unix_error (Unix.ENOENT, _, _) ->
-      return (`Error (`No_directory_entry (base, name)))
-    | Unix.Unix_error (_, str1, str2) -> 
-      return (`Error (`Unknown_error (str1 ^ str2)))
-
+  with Unix.Unix_error (ex, _, _) -> return (map_error ex name)
