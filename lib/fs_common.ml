@@ -45,11 +45,22 @@ let resolve_filename base filename =
   let name = remove_dots parts [] |> String.concat "/" in
   Filename.concat base name
 
-let read_impl base name off len =
-  prerr_endline ("read: " ^ name);
+let map_error err reqd_string = 
+  match err with
+  | Unix.EEXIST -> `Error (`File_already_exists reqd_string)
+  | Unix.EISDIR -> `Error (`Is_a_directory reqd_string)
+  | Unix.ENOENT -> `Error (`No_directory_entry ("", reqd_string))
+  | Unix.ENOSPC -> `Error `No_space
+  | Unix.ENOTDIR -> `Error (`Not_a_directory reqd_string)
+  | Unix.ENOTEMPTY -> `Error (`Directory_not_empty reqd_string)
+  | Unix.EUNKNOWNERR i -> `Error (`Unknown_error 
+                                    (reqd_string ^ ": error " ^ string_of_int i))
+
+let read_impl base name off reqd_len =
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
+    Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek -> (* very little we can do with _seek *)
     let st =
       Lwt_stream.from (fun () ->
         let buf = Cstruct.create 4096 in
@@ -59,20 +70,20 @@ let read_impl base name off len =
            Lwt_unix.close fd
            >>= fun () -> return None
         | len ->
-           return (Some (Cstruct.sub buf 0 len))
+           return (Some (Cstruct.sub buf 0 (min len reqd_len)))
       )
     in
     Lwt_stream.to_list st >>= fun bufs ->
-    return (`Ok bufs)
-  with exn ->
-    return (`Error (`No_directory_entry (base, name)))
+    match reqd_len with
+    | 0 -> return (`Ok [])
+    | n -> return (`Ok bufs)
+  with Unix.Unix_error (ex, _, _) -> return (map_error ex name)
 
 let size_impl base name =
-  prerr_endline ("size: " ^ name);
   let fullname = resolve_filename base name in
   try_lwt
     Lwt_unix.LargeFile.stat fullname >>= fun stat ->
-    let size = stat.Lwt_unix.LargeFile.st_size in
-    return (`Ok size)
-  with exn ->
-    return (`Error (`No_directory_entry (base, name)))
+    match stat.Lwt_unix.LargeFile.st_kind with
+      | Lwt_unix.S_REG -> return (`Ok stat.Lwt_unix.LargeFile.st_size)
+      | _ -> return (`Error (`Is_a_directory name))
+  with Unix.Unix_error (ex, _, _) -> return (map_error ex name)

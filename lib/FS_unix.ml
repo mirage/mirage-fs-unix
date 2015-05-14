@@ -57,24 +57,16 @@ type t = {
   base: string
 }
 
-let connect id =
-  (* TODO verify base directory exists *)
-  return (`Ok { base=id })
-
 let disconnect t =
   return ()
 
 let id {base} = base
 
 let read {base} name off len =
-  Fs_common.read_impl base name off len >|= function
-   | `Error _ -> `Error (`No_directory_entry (base, name))
-   | `Ok data -> `Ok data
+  Fs_common.read_impl base name off len 
 
 let size {base} name =
-  Fs_common.size_impl base name >|= function
-   | `Error _ -> `Error (`No_directory_entry (base, name))
-   | `Ok data -> `Ok data
+  Fs_common.size_impl base name
 
 type stat = {
   filename: string;
@@ -83,20 +75,28 @@ type stat = {
   size: int64;
 }
 
-let rec create_directory path : unit Lwt.t =
-  if Sys.file_exists path then return_unit
-  else (
-    create_directory (Filename.dirname path) >>= fun () ->
-    if Sys.file_exists path then return_unit
-    else
-      catch
-        (fun () -> Lwt_unix.mkdir path 0o755)
-        (fun _  -> return_unit)
-  )
+(* all mkdirs are mkdir -p *)
+let rec create_directory path =
+  let check_type p =
+    Lwt_unix.LargeFile.stat path >>= fun stat ->
+    match stat.Lwt_unix.LargeFile.st_kind with
+    | Lwt_unix.S_DIR -> Lwt.return (`Ok ())
+    | _ -> Lwt.return (`Error (`File_already_exists path))
+  in
+  if Sys.file_exists path then check_type path
+  else begin
+    create_directory (Filename.dirname path) >>= function
+    | `Error e -> Lwt.return (`Error e) (* TODO: this leaks information *)
+    | `Ok () ->
+      try_lwt
+        Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (`Ok ())
+      with Unix.Unix_error (ex, _, _) ->
+        return (Fs_common.map_error ex path)
+  end
 
 let mkdir {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory path >|= fun () -> `Ok ()
+  create_directory path
 
 let command fmt =
   Printf.ksprintf (fun str ->
@@ -117,8 +117,10 @@ let destroy {base} path =
 
 let create {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun () ->
-  command "touch %s" path
+  create_directory (Filename.dirname path) >>= function
+  | `Error e -> Lwt.return (`Error e)
+  | `Ok () ->
+    command "touch %s" path
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
@@ -129,8 +131,15 @@ let stat {base} path0 =
     let read_only = false in
     let directory = Sys.is_directory path in
     return (`Ok { filename; read_only; directory; size })
-  with exn ->
-    return (`Error (`No_directory_entry (base, path0)))
+  with Unix.Unix_error (ex, _, _) ->
+    return (Fs_common.map_error ex path)
+
+let connect id =
+  try_lwt
+    match Sys.is_directory id with
+    | true -> return (`Ok {base = id})
+    | false -> return (`Error (`Not_a_directory id))
+  with (Sys_error _) -> return (`Error (`No_directory_entry (id, "")))
 
 let listdir {base} path =
   let path = Fs_common.resolve_filename base path in
@@ -144,21 +153,29 @@ let listdir {base} path =
 
 let write {base} path off buf =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= fun () ->
-  Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT; O_TRUNC] 0o644) >>= fun fd ->
-  catch
-    (fun () ->
-     Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _ ->
-     let buf = Cstruct.to_string buf in
-     let rec aux off remaining =
-       if remaining = 0 then
-         Lwt_unix.close fd
-       else (
-         Lwt_unix.write fd buf off remaining >>= fun n ->
-         aux (off+n) (remaining-n))
-     in
-     aux 0 (String.length buf) >>= fun () ->
-     return (`Ok ()))
-    (fun e ->
-     Lwt_unix.close fd >>= fun () ->
-     return (`Error (`Unknown_error (Printexc.to_string e))))
+  create_directory (Filename.dirname path) >>= function
+  | `Error e -> Lwt.return (`Error e)
+  | `Ok () ->
+    try_lwt 
+      Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT] 0o644) >>= fun fd ->
+      catch
+        (fun () ->
+           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
+           let buf = Cstruct.to_string buf in
+           let rec aux off remaining =
+             if remaining = 0 then
+               Lwt_unix.close fd
+             else (
+               Lwt_unix.write fd buf off remaining >>= fun n ->
+               aux (off+n) (remaining-n))
+           in
+           aux 0 (String.length buf) >>= fun () ->
+           return (`Ok ()))
+        (fun e ->
+           Lwt_unix.close fd >>= fun () ->
+           match e with
+           | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+           | e -> Lwt.fail e
+        )
+    with
+    | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
