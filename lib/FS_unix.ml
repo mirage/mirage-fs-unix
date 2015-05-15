@@ -98,31 +98,20 @@ let mkdir {base} path =
   let path = Fs_common.resolve_filename base path in
   create_directory path
 
-let command fmt =
-  Printf.ksprintf (fun str ->
-      let i = Sys.command str in
-      if i <> 0 then
-        return (`Error (`Unknown_error (str ^ ": exit " ^ string_of_int i)))
-      else
-        return (`Ok ())
-    ) fmt
-
-let format {base} _ =
-  assert (base <> "/");
-  command "rm -rf %s" base
-
-let destroy {base} path =
-  let path = Fs_common.resolve_filename base path in
-  command "rm -rf %s" path
-
-let create {base} path =
+let open_file base path flags =
   let path = Fs_common.resolve_filename base path in
   create_directory (Filename.dirname path) >>= function
   | `Error e -> Lwt.return (`Error e)
   | `Ok () ->
-    Lwt_unix.openfile path [Lwt_unix.O_CREAT] 0o644 >>= fun fd ->
-    Lwt_unix.close fd >>= fun () ->
-    Lwt.return (`Ok ())
+    try_lwt Lwt_unix.openfile path flags 0o644 >|= fun fd -> `Ok fd
+    with Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+
+let create {base} path =
+  open_file base path [Lwt_unix.O_CREAT] >>= function
+  | `Ok fd ->
+    Lwt_unix.close fd >|= fun () ->
+    `Ok ()
+  | `Error e -> Lwt.return (`Error e)
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
@@ -143,8 +132,7 @@ let connect id =
     | false -> return (`Error (`Not_a_directory id))
   with (Sys_error _) -> return (`Error (`No_directory_entry (id, "")))
 
-let listdir {base} path =
-  let path = Fs_common.resolve_filename base path in
+let list_directory path =
   if Sys.file_exists path then (
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
@@ -153,31 +141,57 @@ let listdir {base} path =
   ) else
     return (`Ok [])
 
-let write {base} path off buf =
+
+let listdir {base} path =
   let path = Fs_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= function
+  list_directory path
+
+let rec remove path =
+  let rec rm dir base p =
+    let full = Filename.concat base p in
+    Lwt_unix.LargeFile.stat full >>= fun stat ->
+    match stat.Lwt_unix.LargeFile.st_kind with
+    | Lwt_unix.S_DIR ->
+      list_directory full >>= (function
+          | `Ok files ->
+            Lwt_list.iter_p (rm true full) files >>= fun () ->
+            if dir then Lwt_unix.rmdir full else Lwt.return_unit
+          | `Error e -> Lwt.fail e)
+    | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
+    | _ -> Lwt.fail (Error (`Unknown_error "cannot remove unknown file type"))
+  in
+  try_lwt (rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
+  with Unix.Unix_error (ex, _, _) -> Lwt.return (Fs_common.map_error ex path)
+
+let format {base} _ =
+  assert (base <> "/");
+  assert (base <> "");
+  remove base
+
+let destroy {base} path =
+  let path = Fs_common.resolve_filename base path in
+  remove path
+
+let write {base} path off buf =
+  open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
+  | `Ok fd ->
+    catch
+      (fun () ->
+         Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
+         let buf = Cstruct.to_string buf in
+         let rec aux off remaining =
+           if remaining = 0 then
+             Lwt_unix.close fd
+           else (
+             Lwt_unix.write fd buf off remaining >>= fun n ->
+             aux (off+n) (remaining-n))
+         in
+         aux 0 (String.length buf) >>= fun () ->
+         return (`Ok ()))
+      (fun e ->
+         Lwt_unix.close fd >>= fun () ->
+         match e with
+         | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+         | e -> Lwt.fail e
+      )
   | `Error e -> Lwt.return (`Error e)
-  | `Ok () ->
-    try_lwt 
-      Lwt_unix.(openfile path [O_WRONLY; O_NONBLOCK; O_CREAT] 0o644) >>= fun fd ->
-      catch
-        (fun () ->
-           Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
-           let buf = Cstruct.to_string buf in
-           let rec aux off remaining =
-             if remaining = 0 then
-               Lwt_unix.close fd
-             else (
-               Lwt_unix.write fd buf off remaining >>= fun n ->
-               aux (off+n) (remaining-n))
-           in
-           aux 0 (String.length buf) >>= fun () ->
-           return (`Ok ()))
-        (fun e ->
-           Lwt_unix.close fd >>= fun () ->
-           match e with
-           | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
-           | e -> Lwt.fail e
-        )
-    with
-    | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
