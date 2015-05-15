@@ -147,7 +147,7 @@ let listdir {base} path =
   list_directory path
 
 let rec remove path =
-  let rec rm dir base p =
+  let rec rm rm_top_dir base p =
     let full = Filename.concat base p in
     Lwt_unix.LargeFile.stat full >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
@@ -155,13 +155,15 @@ let rec remove path =
       list_directory full >>= (function
           | `Ok files ->
             Lwt_list.iter_p (rm true full) files >>= fun () ->
-            if dir then Lwt_unix.rmdir full else Lwt.return_unit
+            if rm_top_dir then Lwt_unix.rmdir full else Lwt.return_unit
           | `Error e -> Lwt.fail e)
     | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
     | _ -> Lwt.fail (Error (`Unknown_error "cannot remove unknown file type"))
   in
   try_lwt (rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
-  with Unix.Unix_error (ex, _, _) -> Lwt.return (Fs_common.map_error ex path)
+  with
+    | Unix.Unix_error (ex, _, _) -> Lwt.return (Fs_common.map_error ex path)
+    | Error x -> Lwt.return (`Error x)
 
 let format {base} _ =
   assert (base <> "/");
