@@ -417,9 +417,12 @@ let format_dir () =
 
 let create () =
   connect_or_fail () >>= fun fs ->
-  FS_unix.create fs "createdoesnotyetexist" >>= function
-  | `Ok () -> Lwt.return_unit
+  let fn = "createdoesnotyetexist" in
+  FS_unix.create fs fn  >>= function
   | `Error e -> OUnit.assert_failure "create failed"
+  | `Ok () -> FS_unix.destroy fs fn >>= function
+    | `Error e -> OUnit.assert_failure "destroy after create failed"
+    | `Ok () -> Lwt.return_unit
 
 let destroy () =
   let files = append_timestamp (test_fs ^ "2") in
