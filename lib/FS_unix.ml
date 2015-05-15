@@ -120,7 +120,9 @@ let create {base} path =
   create_directory (Filename.dirname path) >>= function
   | `Error e -> Lwt.return (`Error e)
   | `Ok () ->
-    command "touch %s" path
+    Lwt_unix.openfile path [Lwt_unix.O_CREAT] 0o644 >>= fun fd ->
+    Lwt_unix.close fd >>= fun () ->
+    Lwt.return (`Ok ())
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
