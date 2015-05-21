@@ -383,6 +383,84 @@ let write_big_file () =
   | _::buf::[]-> check_chars buf 1 2 3; Lwt.return_unit
   | _ -> OUnit.assert_failure "read sent back a nonsensible number of buffers"
 
+let populate num depth fs =
+  let rec gen_d pref = function
+    | 0 -> "foo"
+    | x -> Filename.concat (pref ^ (string_of_int x)) (gen_d pref (pred x))
+  in
+  let rec gen_l acc = function
+    | 0 -> acc
+    | x -> gen_l (gen_d (string_of_int x) depth :: acc) (pred x)
+  in
+  (* populate a bit *)
+  Lwt_list.iteri_s (fun i x ->
+      FS_unix.create fs (append_timestamp ("foo" ^ x ^ (string_of_int i))) >>= function
+      | `Ok () -> Lwt.return_unit
+      | `Error e -> OUnit.assert_failure ("error populating filesystem:" ^ (FS_unix.string_of_error e))) (gen_l [] num)
+
+
+let format_dir () =
+  let files = append_timestamp (test_fs ^ "1") in
+  Lwt_unix.mkdir files 0o755 >>= fun () ->
+  let cleanup () = Lwt_unix.rmdir files in
+  (FS_unix.connect files >>= function
+    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
+    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  populate 10 4 fs >>= fun () ->
+  FS_unix.format fs 1L >>= function
+  | `Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "format failed"
+  | `Ok () ->
+    FS_unix.listdir fs "/" >>= function
+    | `Ok [] -> cleanup ()
+    | `Ok xs -> OUnit.assert_failure "something exists after format"
+    | `Error _ -> OUnit.assert_failure "error in listdir"
+
+let create () =
+  connect_or_fail () >>= fun fs ->
+  let fn = "createdoesnotyetexist" in
+  FS_unix.create fs fn  >>= function
+  | `Error e -> OUnit.assert_failure "create failed"
+  | `Ok () -> FS_unix.destroy fs fn >>= function
+    | `Error e -> OUnit.assert_failure "destroy after create failed"
+    | `Ok () -> Lwt.return_unit
+
+let destroy () =
+  let files = append_timestamp (test_fs ^ "2") in
+  Lwt_unix.mkdir files 0o755 >>= fun () ->
+  let cleanup () = Lwt_unix.rmdir files in
+  (FS_unix.connect files >>= function
+    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
+    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  populate 10 4 fs >>= fun () ->
+  FS_unix.destroy fs "/" >>= function
+  | `Error e -> cleanup () >>= fun () -> OUnit.assert_failure "create failed"
+  | `Ok () ->
+    FS_unix.listdir fs "/" >>= function
+    | `Ok [] -> cleanup ()
+    | `Ok xs -> OUnit.assert_failure "something exists after destroy"
+    | `Error _ -> OUnit.assert_failure "error in listdir"
+
+let destroy_a_bit () =
+  let files = append_timestamp (test_fs ^ "3") in
+  Lwt_unix.mkdir files 0o755 >>= fun () ->
+  let cleanup () = let _ = Sys.command ("rm -rf " ^ files) in Lwt.return_unit in
+  (FS_unix.connect files >>= function
+    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
+    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  populate 10 4 fs >>= fun () ->
+  FS_unix.listdir fs "/" >>= (function
+    | `Ok xs -> Lwt.return (List.length xs)
+    | `Error _ -> OUnit.assert_failure "error in listdir") >>= fun files ->
+  FS_unix.create fs "barf" >>= function
+  | `Error e -> cleanup () >>= fun () -> OUnit.assert_failure "create failed"
+  | `Ok () -> FS_unix.destroy fs "barf" >>= (function
+      | `Error e -> cleanup () >>= fun () -> OUnit.assert_failure "destroy failed"
+      | `Ok () -> FS_unix.listdir fs "/" >>= (function
+          | `Ok xs when List.length xs = files -> cleanup ()
+          | `Ok _ -> OUnit.assert_failure "something wrong in destroy: destroy followed by create is not well behaving"
+          | `Error _ -> OUnit.assert_failure "error in listdir"))
+
+
 let () =
   let connect = [ 
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -402,8 +480,13 @@ let () =
     "read_at_offset_past_eof", `Quick, lwt_run read_at_offset_past_eof;
     "read_big_file", `Quick, lwt_run read_big_file;
   ] in
-  let create = [ ] in
-  let destroy = [ ] in
+  let create = [
+    "create_file", `Quick, lwt_run create
+  ] in
+  let destroy = [
+    "destroy_file", `Quick, lwt_run destroy;
+    "create_destroy_file", `Quick, lwt_run destroy_a_bit
+  ] in
   let size = [ 
     "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
     "size_empty_file", `Quick, lwt_run size_empty_file;
@@ -430,7 +513,8 @@ let () =
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
     "write_big_file", `Quick, lwt_run write_big_file;
   ] in
-  let format = [ ] in
+  let format = [ "format_directory", `Quick, lwt_run format_dir ]
+  in
   Alcotest.run "FS_unix" [
     "connect", connect;
     "read", read;
