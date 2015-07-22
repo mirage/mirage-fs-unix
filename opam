@@ -1,6 +1,7 @@
 opam-version: "1.2"
-authors:      ["Anil Madhavapeddy <anil@recoil.org>" ]
-maintainer:   "anil@recoil.org"
+authors:      [ "Mindy Preston" "Hannes Mehnert" "Anil Madhavapeddy"
+                "Thomas Gazagnaire" ]
+maintainer:   [ "anil@recoil.org" "thomas@gazagnaire.org"]
 homepage:     "https://github.com/mirage/mirage-fs-unix"
 dev-repo:     "https://github.com/mirage/mirage-fs-unix.git"
 bug-reports:  "https://github.com/mirage/mirage-fs-unix/issues"
