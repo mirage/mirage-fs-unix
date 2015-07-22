@@ -1,23 +1,26 @@
 opam-version: "1.2"
-authors: [ "Anil Madhavapeddy <anil@recoil.org>" ]
-maintainer: "anil@recoil.org"
+authors:      ["Anil Madhavapeddy <anil@recoil.org>" ]
+maintainer:   "anil@recoil.org"
 homepage:     "https://github.com/mirage/mirage-fs-unix"
 dev-repo:     "https://github.com/mirage/mirage-fs-unix.git"
 bug-reports:  "https://github.com/mirage/mirage-fs-unix/issues"
 tags: [ "org:mirage" ]
-build: [ 
-  ["./configure" "--prefix" prefix "--%{alcotest:enable}%-tests"
-  ] 
+build: [
+  ["./configure" "--prefix" prefix]
   [make]
 ]
-build-test: [ make "test" ]
-install: [ [make "install"] ]
+build-test: [
+  ["./configure" "--prefix" prefix "--enable-tests"]
+  [make "test" ]
+]
+install: [make "install"]
 remove: ["ocamlfind" "remove" "mirage-fs-unix"]
 depends: [
-  "ocamlfind"
+  "ocamlfind" {build}
   "cstruct" {>= "1.4.0"}
   "mirage-types-lwt"
   "mirage-clock-unix" {test}
-  "alcotest" {test}
+  "alcotest"          {test}
+  "ounit"             {test}
 ]
 available: [ ocaml-version >= "4.01.0"]
