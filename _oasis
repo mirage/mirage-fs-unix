@@ -21,7 +21,7 @@ Executable test_fs_unix
   MainIs:             test_fs_unix.ml
   Custom:             true
   Build$:             flag(tests)
-  BuildDepends:       mirage-fs-unix, mirage-clock-unix, alcotest
+  BuildDepends:       mirage-fs-unix, mirage-clock-unix, alcotest, oUnit
 
 Test fs_unix
   Run$:               flag(tests)
