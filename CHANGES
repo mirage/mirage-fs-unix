@@ -1,3 +1,7 @@
+1.2.0 (2015-07-22)
+* Remove the use of unescaped `Sys.command` (#12, by @hannesm)
+* Add tests for read, write, mkdir, size; make them pass (#10, by @yomimono)
+
 1.1.4 (2015-03-08)
 * Add explicit `connect` signature into interface (#8).
 * Add an `opam` file for OPAM 1.2 pinning workflow.
