@@ -56,38 +56,41 @@ let map_error err reqd_string =
   | Unix.EUNKNOWNERR i -> `Error (`Unknown_error 
                                     (reqd_string ^ ": error " ^ string_of_int i))
 
+let err_catcher name = function
+  | Unix.Unix_error (ex, _, _) -> return (map_error ex name)
+  | exn -> Lwt.fail exn
+
 let read_impl base name off reqd_len =
-  if reqd_len < 0 then return (`Error (`Unknown_error "can't read negative bytes"
-                                      ))
+  if reqd_len < 0 then return (`Error (`Unknown_error "can't read negative bytes"))
   else begin
-  let fullname = resolve_filename base name in
-    try_lwt
-      Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
-      Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek -> (* very little we can do with _seek *)
-      let st =
-        Lwt_stream.from (fun () ->
-          let buf = Cstruct.create 4096 in
-          lwt len = Lwt_cstruct.read fd buf in
-          match len with
-          | 0 ->
-             Lwt_unix.close fd
-             >>= fun () -> return None
-          | len ->
-             return (Some (Cstruct.sub buf 0 (min len reqd_len)))
-        )
-      in
-      Lwt_stream.to_list st >>= fun bufs ->
-      match reqd_len with
-      | 0 -> return (`Ok [])
-      | n -> return (`Ok bufs)
-    with Unix.Unix_error (ex, _, _) -> return (map_error ex name)
+    let fullname = resolve_filename base name in
+    Lwt.catch (fun () ->
+        Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
+        Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek -> (* very little we can do with _seek *)
+        let st =
+          Lwt_stream.from (fun () ->
+              let buf = Cstruct.create 4096 in
+              Lwt_cstruct.read fd buf >>= fun len ->
+              match len with
+              | 0 ->
+                Lwt_unix.close fd
+                >>= fun () -> return None
+              | len ->
+                return (Some (Cstruct.sub buf 0 (min len reqd_len)))
+            )
+        in
+        Lwt_stream.to_list st >>= fun bufs ->
+        match reqd_len with
+        | 0 -> return (`Ok [])
+        | n -> return (`Ok bufs) )
+      (err_catcher name)
   end
 
 let size_impl base name =
   let fullname = resolve_filename base name in
-  try_lwt
+  Lwt.catch (fun () ->
     Lwt_unix.LargeFile.stat fullname >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
       | Lwt_unix.S_REG -> return (`Ok stat.Lwt_unix.LargeFile.st_size)
-      | _ -> return (`Error (`Is_a_directory name))
-  with Unix.Unix_error (ex, _, _) -> return (map_error ex name)
+      | _ -> return (`Error (`Is_a_directory name)))
+    (err_catcher name)
