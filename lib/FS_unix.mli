@@ -18,8 +18,7 @@
 (** Loopback implementation of the FS signature. *)
 
 include V1.FS
-  with type id = string
-   and type +'a io = 'a Lwt.t
+  with type +'a io = 'a Lwt.t
    and type page_aligned_buffer = Cstruct.t
 
 val string_of_error: error -> string

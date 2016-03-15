@@ -15,8 +15,7 @@
  *)
 
 include V1.KV_RO
-  with type id = string
-   and type +'a io = 'a Lwt.t
+  with type +'a io = 'a Lwt.t
    and type page_aligned_buffer = Cstruct.t
 
 val connect : string -> [`Ok of t | `Error of error] io
