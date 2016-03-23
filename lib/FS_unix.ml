@@ -88,10 +88,13 @@ let rec create_directory path =
     create_directory (Filename.dirname path) >>= function
     | `Error e -> Lwt.return (`Error e) (* TODO: this leaks information *)
     | `Ok () ->
-      try_lwt
+      catch (fun () -> 
         Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (`Ok ())
-      with Unix.Unix_error (ex, _, _) ->
-        return (Fs_common.map_error ex path)
+      )
+      (function
+        | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+        | e -> Lwt.fail e
+      )
   end
 
 let mkdir {base} path =
@@ -103,8 +106,10 @@ let open_file base path flags =
   create_directory (Filename.dirname path) >>= function
   | `Error e -> Lwt.return (`Error e)
   | `Ok () ->
-    try_lwt Lwt_unix.openfile path flags 0o644 >|= fun fd -> `Ok fd
-    with Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+    catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> `Ok fd)
+    (function
+      | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+      | e -> Lwt.fail e)
 
 let create {base} path =
   open_file base path [Lwt_unix.O_CREAT] >>= function
@@ -115,22 +120,24 @@ let create {base} path =
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
-  try_lwt
+  catch (fun () -> 
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     let size = stat.Lwt_unix.LargeFile.st_size in
     let filename = Filename.basename path in
     let read_only = false in
     let directory = Sys.is_directory path in
     return (`Ok { filename; read_only; directory; size })
-  with Unix.Unix_error (ex, _, _) ->
-    return (Fs_common.map_error ex path)
+  ) 
+  (function
+    | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+    | e -> Lwt.fail e)
 
 let connect id =
-  try_lwt
+  catch (fun () -> 
     match Sys.is_directory id with
     | true -> return (`Ok {base = id})
-    | false -> return (`Error (`Not_a_directory id))
-  with (Sys_error _) -> return (`Error (`No_directory_entry (id, "")))
+    | false -> return (`Error (`Not_a_directory id)))
+  (fun (Sys_error _) -> return (`Error (`No_directory_entry (id, ""))))
 
 let list_directory path =
   if Sys.file_exists path then (
@@ -160,10 +167,11 @@ let rec remove path =
     | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
     | _ -> Lwt.fail (Error (`Unknown_error "cannot remove unknown file type"))
   in
-  try_lwt (rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
-  with
+  catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
+  (function  
     | Unix.Unix_error (ex, _, _) -> Lwt.return (Fs_common.map_error ex path)
     | Error x -> Lwt.return (`Error x)
+  )
 
 let format {base} _ =
   assert (base <> "/");
