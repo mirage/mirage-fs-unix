@@ -13,7 +13,7 @@ Library mirage_fs_unix
   Findlibname:        mirage-fs-unix
   InternalModules:    Fs_common
   Modules:            Kvro_fs_unix, FS_unix
-  BuildDepends:       lwt, lwt.unix, lwt.syntax, mirage-types, cstruct.lwt
+  BuildDepends:       lwt, lwt.unix, mirage-types, cstruct.lwt
 
 Executable test_fs_unix
   Path:               lib_test/

@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: d22b2699eb3a9fe608d8f4a0d714d87a)
+# DO NOT EDIT (digest: cb53f1bdedce4796140a4202bac5038f)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -18,14 +18,12 @@ true: annot, bin_annot
 "lib/mirage_fs_unix.cmxs": use_mirage_fs_unix
 <lib/*.ml{,i,y}>: pkg_cstruct.lwt
 <lib/*.ml{,i,y}>: pkg_lwt
-<lib/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/*.ml{,i,y}>: pkg_lwt.unix
 <lib/*.ml{,i,y}>: pkg_mirage-types
 # Executable test_fs_unix
 "lib_test/test_fs_unix.byte": pkg_alcotest
 "lib_test/test_fs_unix.byte": pkg_cstruct.lwt
 "lib_test/test_fs_unix.byte": pkg_lwt
-"lib_test/test_fs_unix.byte": pkg_lwt.syntax
 "lib_test/test_fs_unix.byte": pkg_lwt.unix
 "lib_test/test_fs_unix.byte": pkg_mirage-clock-unix
 "lib_test/test_fs_unix.byte": pkg_mirage-types
@@ -34,7 +32,6 @@ true: annot, bin_annot
 <lib_test/*.ml{,i,y}>: pkg_alcotest
 <lib_test/*.ml{,i,y}>: pkg_cstruct.lwt
 <lib_test/*.ml{,i,y}>: pkg_lwt
-<lib_test/*.ml{,i,y}>: pkg_lwt.syntax
 <lib_test/*.ml{,i,y}>: pkg_lwt.unix
 <lib_test/*.ml{,i,y}>: pkg_mirage-clock-unix
 <lib_test/*.ml{,i,y}>: pkg_mirage-types
