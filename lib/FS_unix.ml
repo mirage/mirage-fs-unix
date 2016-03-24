@@ -127,10 +127,8 @@ let stat {base} path0 =
     let read_only = false in
     let directory = Sys.is_directory path in
     return (`Ok { filename; read_only; directory; size })
-  ) 
-  (function
-    | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
-    | e -> Lwt.fail e)
+  )
+  (fun e -> Fs_common.err_catcher path e)
 
 let connect id =
   catch (fun () -> 
@@ -168,10 +166,7 @@ let rec remove path =
     | _ -> Lwt.fail (Error (`Unknown_error "cannot remove unknown file type"))
   in
   catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
-  (function  
-    | Unix.Unix_error (ex, _, _) -> Lwt.return (Fs_common.map_error ex path)
-    | Error x -> Lwt.return (`Error x)
-  )
+  (fun e -> Fs_common.err_catcher path e)
 
 let format {base} _ =
   assert (base <> "/");
@@ -184,6 +179,7 @@ let destroy {base} path =
 
 let write {base} path off buf =
   open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
+  | `Error e -> Lwt.return (`Error e)
   | `Ok fd ->
     catch
       (fun () ->
@@ -200,8 +196,5 @@ let write {base} path off buf =
          return (`Ok ()))
       (fun e ->
          Lwt_unix.close fd >>= fun () ->
-         match e with
-         | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
-         | e -> Lwt.fail e
+         Fs_common.err_catcher path e
       )
-  | `Error e -> Lwt.return (`Error e)
