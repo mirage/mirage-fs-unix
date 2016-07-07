@@ -46,13 +46,13 @@ let resolve_filename base filename =
   Filename.concat base name
 
 let string_of_error = function
-  | Unix.EEXIST -> "File already exists"
-  | Unix.EISDIR -> "Path is a directory"
-  | Unix.ENOENT -> "An element in the path doesn't exist"
-  | Unix.ENOSPC -> "Out of space"
-  | Unix.ENOTDIR -> "An element in the path isn't a directory"
-  | Unix.ENOTEMPTY -> "The directory is not empty"
-  | Unix.EUNKNOWNERR i -> Printf.sprintf ("Unknown error %d") i
+  | `File_already_exists s -> "File already exists: " ^ s
+  | `Is_a_directory s -> "Path is a directory: " ^ s
+  | `No_directory_entry (_, s) -> "An element in the path doesn't exist: " ^ s
+  | `No_space -> "Out of space"
+  | `Not_a_directory s -> "An element in the path isn't a directory: " ^ s
+  | `Directory_not_empty s -> "The directory is not empty: " ^ s
+  | `Unknown_error s -> "Unknown error: : " ^ s
 
 let map_error err reqd_string = 
   match err with
@@ -76,7 +76,7 @@ let mem_impl base name =
         )
   (function
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (`Ok false)
-          | Unix.Unix_error (err, _, _) -> err_catcher name)
+          | e -> err_catcher name e)
 
 let read_impl base name off reqd_len =
   if reqd_len < 0 then return (`Error (`Unknown_error "can't read negative bytes"))
