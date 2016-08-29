@@ -1,3 +1,7 @@
+1.2.1 (2016-08-16)
+* Remove use of `lwt.syntax`. (#20, by @yomimono)
+* Remove unused `id` type. (#19, by @talex5)
+
 1.2.0 (2015-07-22)
 * Remove the use of unescaped `Sys.command` (#12, by @hannesm)
 * Add tests for read, write, mkdir, size; make them pass (#10, by @yomimono)
