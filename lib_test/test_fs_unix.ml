@@ -46,7 +46,7 @@ let clock =
   | `Ok c -> Lwt.return c) ()
 
 let append_timestamp s =
-  Fmt.strf "%s-%a" s Ptime.pp (Ptime.v (Pclock.now_d_ps clock))
+  Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) (Ptime.v (Pclock.now_d_ps clock))
 
 let full_path dirname filename = dirname ^ "/" ^ filename
 
