@@ -23,5 +23,6 @@ depends: [
   "mirage-clock-unix" {test}
   "alcotest"          {test}
   "ounit"             {test}
+  "ptime"             {test}
 ]
 available: [ ocaml-version >= "4.01.0"]
