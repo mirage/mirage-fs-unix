@@ -40,8 +40,13 @@ let do_or_fail = function
 let connect_present_dir () =
   connect_or_fail () >>= fun _fs -> Lwt.return_unit
 
+let clock =
+  lwt_run (fun () -> Pclock.connect () >>= function
+  | `Error _ -> OUnit.assert_failure "Couldnt connect to unix clock"
+  | `Ok c -> Lwt.return c) ()
+
 let append_timestamp s =
-  s ^ "-" ^ (string_of_float (Clock.time ()))
+  Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) (Ptime.v (Pclock.now_d_ps clock))
 
 let full_path dirname filename = dirname ^ "/" ^ filename
 
