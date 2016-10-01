@@ -28,22 +28,15 @@ let lwt_run f () = Lwt_main.run (f ())
 
 let assert_fail e = OUnit.assert_failure (FS_impl.string_of_error e)
 
-let connect_or_fail () =
-  FS_impl.connect test_fs >>= function
-  | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs; all tests will fail"
-  | `Ok fs -> Lwt.return fs
-
 let do_or_fail = function
   | `Error e -> assert_fail e
   | `Ok p -> Lwt.return p
 
 let connect_present_dir () =
-  connect_or_fail () >>= fun _fs -> Lwt.return_unit
+  FS_impl.connect test_fs >>= fun _fs -> Lwt.return_unit
 
 let clock =
-  lwt_run (fun () -> Pclock.connect () >>= function
-  | `Error _ -> OUnit.assert_failure "Couldnt connect to unix clock"
-  | `Ok c -> Lwt.return c) ()
+  lwt_run (fun () -> Pclock.connect ()) ()
 
 let append_timestamp s =
   Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) (Ptime.v (Pclock.now_d_ps clock))
@@ -57,17 +50,16 @@ let just_one_and_is expected read_bufs =
   Lwt.return read_bufs
 
 let expect_error_connecting where () =
-  FS_impl.connect "" >>= function
-  | `Error _ -> Lwt.return_unit 
-  | `Ok fs -> OUnit.assert_failure 
-                (Printf.sprintf "connect let us make an FS at %s" where)
+  Lwt.catch
+    (fun () -> FS_impl.connect where >>= fun _ -> fail_with "expected error")
+    (fun _ -> Lwt.return_unit)
 
 let connect_to_empty_string = expect_error_connecting ""
 
 let connect_to_dev_null = expect_error_connecting "/dev/null"
 
 let read_nonexistent_file file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs file 0 1 >>= function
   | `Ok _ ->
     OUnit.assert_failure ("read returned `Ok when no file was expected. 
@@ -92,7 +84,7 @@ let read_nonexistent_file file () =
     Lwt.return_unit
 
 let read_empty_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs empty_file 0 1 >>= function
   | `Ok [] -> Lwt.return_unit
   | `Ok bufs -> 
@@ -103,7 +95,7 @@ let read_empty_file () =
   | `Error e -> assert_fail e
 
 let read_zero_bytes () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 0 >>= function
   | `Ok [] -> Lwt.return_unit
   | `Ok bufs ->
@@ -115,7 +107,7 @@ let read_zero_bytes () =
 
 (* reasonable responses are `Ok [] or an error *)
 let read_negative_bytes () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 (-5) >>= function
   | `Ok [] -> Lwt.return_unit
   | `Ok bufs ->
@@ -127,7 +119,7 @@ let read_negative_bytes () =
   | `Error e -> assert_fail e
 
 let read_too_many_bytes () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 65535 >>= function
   | `Ok bufs -> 
     OUnit.assert_equal ~printer:string_of_int 1 (List.length bufs);
@@ -139,23 +131,23 @@ let read_too_many_bytes () =
   | `Error e -> assert_fail e
 
 let read_at_offset () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 1 20 >>= do_or_fail >>= 
   just_one_and_is "ome content\n" >>= fun _ -> Lwt.return_unit
 
 let read_subset_of_bytes () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 4 >>= do_or_fail >>= just_one_and_is "some" >>=
   fun _bufs -> Lwt.return_unit
 
 let read_at_offset_past_eof () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 50 10 >>= do_or_fail >>= function
   | [] -> Lwt.return_unit
   | _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
 
 let read_big_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs big_file >>= do_or_fail >>= fun size ->
   FS_impl.read fs big_file 0 10000 >>= function
   | `Error e -> assert_fail e
@@ -167,7 +159,7 @@ let read_big_file () =
   | `Ok _ -> OUnit.assert_failure "read didn't split a large file across pages as expected"
 
 let size_nonexistent_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   let filename = "^#$\000not a file!!!. &;" in
   FS_impl.size fs filename >>= function
   | `Ok d -> 
@@ -179,19 +171,19 @@ let size_nonexistent_file () =
   | `Error e -> assert_fail e
 
 let size_empty_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs empty_file >>= do_or_fail >>= fun n ->
   OUnit.assert_equal ~msg:"size of an empty file" ~printer:Int64.to_string (Int64.zero) n;
   Lwt.return_unit
 
 let size_small_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs content_file >>= do_or_fail >>= fun n ->
   OUnit.assert_equal ~msg:"size of a small file" ~printer:Int64.to_string (Int64.of_int 13) n;
   Lwt.return_unit
 
 let size_a_directory () = 
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs directory >>= function
   | `Error (`Is_a_directory location) -> 
     OUnit.assert_equal ~printer:(fun a -> a) directory location; Lwt.return_unit
@@ -200,17 +192,17 @@ let size_a_directory () =
                (Printf.sprintf "got size %s on a directory" (Int64.to_string n))
 
 let size_big_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs big_file >>= do_or_fail >>= fun size ->
   OUnit.assert_equal ~printer:Int64.to_string (Int64.of_int 5000) size;
   Lwt.return_unit
 
 let mkdir_already_empty_directory () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs directory >>= do_or_fail >>= fun () -> Lwt.return_unit
 
 let mkdir_over_file () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs empty_file >>= function
   | `Error (`File_already_exists _) -> Lwt.return_unit
   | `Error e -> assert_fail e
@@ -227,7 +219,7 @@ let mkdir_over_file () =
         OUnit.assert_failure "mkdir falsely reported success making a directory over an existing file"
 
 let mkdir_over_directory_with_contents () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   let tempdir = append_timestamp "mkdir_over_directory_with_contents" in
   FS_impl.mkdir fs tempdir >>= do_or_fail >>= fun () ->
   FS_impl.mkdir fs (tempdir ^ "/cool tapes") >>= do_or_fail >>= fun () ->
@@ -244,12 +236,12 @@ let mkdir_over_directory_with_contents () =
 
 let mkdir_in_path_not_present () =
   let not_a_thing = "%%#@*%#@  $ /my awesome directory!!!" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs not_a_thing >>= do_or_fail >>= fun () -> Lwt.return_unit
 
 let mkdir_credibly () = 
   let dirname = append_timestamp "mkdir_credibly" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_impl.stat fs dirname >>= do_or_fail >>= fun s ->
   let open FS_impl in
@@ -262,7 +254,7 @@ let write_not_a_dir () =
   let subdir = "not there" in
   let content = "puppies" in
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
   FS_impl.stat fs full_path >>= function
@@ -282,7 +274,7 @@ let write_zero_bytes () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 0 (Cstruct.create 0) >>= do_or_fail >>= fun () ->
   let open FS_impl in
@@ -301,7 +293,7 @@ let write_contents_correct () =
   let dirname = append_timestamp "write_contents_correct" in
   let full_path = full_path dirname "short_phrase" in
   let phrase = "standing here on this frozen lake" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.write fs full_path 0 (Cstruct.of_string phrase) >>= do_or_fail >>= fun () ->
   FS_impl.read fs full_path 0 (String.length phrase) >>= do_or_fail >>=
   just_one_and_is phrase >>= fun _ -> Lwt.return_unit
@@ -312,7 +304,7 @@ let write_at_offset_within_file () =
   let preamble = "given this information, " in
   let boring = "action is required." in
   let better_idea = "let's go ride bikes" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 0 (Cstruct.of_string (preamble ^ boring))
   >>= do_or_fail >>= fun () ->
@@ -328,7 +320,7 @@ let write_at_offset_past_eof () =
   let full_path = full_path dirname "initially_contentful" in
   let content = "repetition for its own sake." in
   let replacement = "ating yourself is super fun!" in
-  connect_or_fail () >>= fun fs -> 
+  FS_impl.connect test_fs >>= fun fs -> 
   FS_impl.write fs full_path 0 (Cstruct.of_string content) >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 4 (Cstruct.of_string replacement) >>= do_or_fail >>= fun () ->
   FS_impl.stat fs full_path >>= do_or_fail >>= fun s ->
@@ -338,7 +330,7 @@ let write_at_offset_past_eof () =
 
 let write_overwrite_dir () =
   let dirname = append_timestamp "write_overwrite_dir" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >>= do_or_fail >>= fun () ->
   FS_impl.write fs dirname 0 (Cstruct.of_string "noooooo") >>= function
   | `Error (`Is_a_directory _) -> Lwt.return_unit
@@ -356,7 +348,7 @@ let write_at_offset_is_eof () =
   let full_path = full_path dirname "database.sql" in
   let extant_data = "important record do not overwrite :)\n" in
   let new_data = "some more super important data!\n" in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.write fs full_path 0 (Cstruct.of_string extant_data) 
   >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path (String.length extant_data) (Cstruct.of_string new_data)
@@ -370,7 +362,7 @@ let write_at_offset_beyond_eof () =
   let dirname = append_timestamp "write_at_offset_beyond_eof" in
   let filename = "database.sql" in
   let full_path = full_path dirname filename in
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.write fs full_path 0 (Cstruct.of_string "antici") >>= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 10 (Cstruct.of_string "pation") >>= do_or_fail >>= fun () ->
   FS_impl.read fs full_path 0 4096 >>= do_or_fail 
@@ -389,7 +381,7 @@ let write_big_file () =
   Cstruct.set_char first_page 4097 'A';
   Cstruct.set_char first_page 4098 'B';
   Cstruct.set_char first_page 4099 'C';
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   FS_impl.write fs full_path 0 first_page >>= do_or_fail >>= fun () ->
   FS_impl.size fs full_path >>= do_or_fail >>= fun sz ->
   let check_chars buf a b c =
@@ -423,9 +415,7 @@ let format_dir () =
   let files = append_timestamp (test_fs ^ "1") in
   Lwt_unix.mkdir files 0o755 >>= fun () ->
   let cleanup () = Lwt_unix.rmdir files in
-  (FS_impl.connect files >>= function
-    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
-    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
   FS_impl.format fs 1L >>= function
   | `Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "format failed"
@@ -436,7 +426,7 @@ let format_dir () =
     | `Error _ -> OUnit.assert_failure "error in listdir"
 
 let create () =
-  connect_or_fail () >>= fun fs ->
+  FS_impl.connect test_fs >>= fun fs ->
   let fn = "createdoesnotyetexist" in
   FS_impl.create fs fn  >>= function
   | `Error e -> OUnit.assert_failure "create failed"
@@ -448,9 +438,7 @@ let destroy () =
   let files = append_timestamp (test_fs ^ "2") in
   Lwt_unix.mkdir files 0o755 >>= fun () ->
   let cleanup () = Lwt_unix.rmdir files in
-  (FS_impl.connect files >>= function
-    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
-    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
   FS_impl.destroy fs "/" >>= function
   | `Error e -> cleanup () >>= fun () -> OUnit.assert_failure "create failed"
@@ -464,9 +452,7 @@ let destroy_a_bit () =
   let files = append_timestamp (test_fs ^ "3") in
   Lwt_unix.mkdir files 0o755 >>= fun () ->
   let cleanup () = let _ = Sys.command ("rm -rf " ^ files) in Lwt.return_unit in
-  (FS_impl.connect files >>= function
-    | `Error _ -> OUnit.assert_failure "Couldn't connect to test fs"
-    | `Ok fs -> Lwt.return fs) >>= fun fs ->
+  FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
   FS_impl.listdir fs "/" >>= (function
     | `Ok xs -> Lwt.return (List.length xs)

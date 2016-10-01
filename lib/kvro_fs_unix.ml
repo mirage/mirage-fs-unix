@@ -29,7 +29,7 @@ type t = {
 
 let connect id =
   (* TODO verify base directory exists *)
-  return (`Ok { base=id })
+  return ({ base=id })
 
 let disconnect t =
   return ()
