@@ -131,11 +131,11 @@ let stat {base} path0 =
   (fun e -> Fs_common.err_catcher path e)
 
 let connect id =
-  catch (fun () -> 
-    match Sys.is_directory id with
-    | true -> return (`Ok {base = id})
-    | false -> return (`Error (`Not_a_directory id)))
-  (fun (Sys_error _) -> return (`Error (`No_directory_entry (id, ""))))
+  try if Sys.is_directory id then
+      return ({base = id})
+    else
+      fail_with ("Not a directory " ^  id)
+  with Sys_error _ -> fail_with ("Not an entity " ^ id)
 
 let list_directory path =
   if Sys.file_exists path then (
