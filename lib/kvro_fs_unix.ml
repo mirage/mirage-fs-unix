@@ -21,6 +21,7 @@ type +'a io = 'a Lwt.t
 type id = string
 type error =
   | Unknown_key of string
+  | Failure of string
 type page_aligned_buffer = Cstruct.t
 
 type t = {
@@ -36,12 +37,19 @@ let disconnect t =
 
 let id {base} = base
 
+let mem {base} name =
+  Fs_common.mem_impl base name >|= function
+   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
+   | `Ok data -> `Ok data
+
 let read {base} name off len =
   Fs_common.read_impl base name off len >|= function
-   | `Error _ -> `Error (Unknown_key name)
+   | `Error (`No_directory_entry (_, s))-> `Error (Unknown_key s)
+   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
    | `Ok data -> `Ok data
 
 let size {base} name =
   Fs_common.size_impl base name >|= function
-   | `Error _ -> `Error (Unknown_key name)
+   | `Error (`No_directory_entry (_, s))-> `Error (Unknown_key s)
+   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
    | `Ok data -> `Ok data

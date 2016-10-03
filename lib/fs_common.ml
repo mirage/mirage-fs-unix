@@ -45,6 +45,15 @@ let resolve_filename base filename =
   let name = remove_dots parts [] |> String.concat "/" in
   Filename.concat base name
 
+let string_of_error = function
+  | `File_already_exists s -> "File already exists: " ^ s
+  | `Is_a_directory s -> "Path is a directory: " ^ s
+  | `No_directory_entry (_, s) -> "An element in the path doesn't exist: " ^ s
+  | `No_space -> "Out of space"
+  | `Not_a_directory s -> "An element in the path isn't a directory: " ^ s
+  | `Directory_not_empty s -> "The directory is not empty: " ^ s
+  | `Unknown_error s -> "Unknown error: : " ^ s
+
 let map_error err reqd_string = 
   match err with
   | Unix.EEXIST -> `Error (`File_already_exists reqd_string)
@@ -59,6 +68,15 @@ let map_error err reqd_string =
 let err_catcher name = function
   | Unix.Unix_error (ex, _, _) -> return (map_error ex name)
   | exn -> Lwt.fail exn
+
+let mem_impl base name =
+  let fullname = resolve_filename base name in
+  Lwt.catch (fun () ->
+          Lwt_unix.stat fullname >>= fun _ -> Lwt.return (`Ok true)
+        )
+  (function
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (`Ok false)
+          | e -> err_catcher name e)
 
 let read_impl base name off reqd_len =
   if reqd_len < 0 then return (`Error (`Unknown_error "can't read negative bytes"))
