@@ -19,7 +19,6 @@
 open Lwt
 
 type +'a io = 'a Lwt.t
-type id = string
 type block_device_error = unit
 
 type error = [
@@ -59,8 +58,6 @@ type t = {
 
 let disconnect t =
   return ()
-
-let id {base} = base
 
 let read {base} name off len =
   Fs_common.read_impl base name off len 

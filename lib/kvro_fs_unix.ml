@@ -18,7 +18,6 @@
 open Lwt
 
 type +'a io = 'a Lwt.t
-type id = string
 type error =
   | Unknown_key of string
   | Failure of string
@@ -34,8 +33,6 @@ let connect id =
 
 let disconnect t =
   return ()
-
-let id {base} = base
 
 let mem {base} name =
   Fs_common.mem_impl base name >|= function
