@@ -19,10 +19,12 @@ remove: ["ocamlfind" "remove" "mirage-fs-unix"]
 depends: [
   "ocamlfind" {build}
   "cstruct" {>= "1.4.0"}
-  "mirage-types-lwt"
+  "mirage-types-lwt"  {>= "3.0.0"}
+  "mirage-runtime"
+  "rresult"
   "mirage-clock-unix" {test}
   "alcotest"          {test}
   "ounit"             {test}
   "ptime"             {test}
 ]
-available: [ ocaml-version >= "4.01.0"]
+available: [ ocaml-version >= "4.03.0"]

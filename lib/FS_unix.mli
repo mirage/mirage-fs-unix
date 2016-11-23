@@ -21,7 +21,4 @@ include V1.FS
   with type +'a io = 'a Lwt.t
    and type page_aligned_buffer = Cstruct.t
 
-val string_of_error: error -> string
-(** Pretty print errors. *)
-
 val connect : string -> t io
