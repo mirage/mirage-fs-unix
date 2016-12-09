@@ -18,9 +18,7 @@
 open Lwt
 
 type +'a io = 'a Lwt.t
-type error =
-  | Unknown_key of string
-  | Failure of string
+type error = V1.Kv_ro.error
 type page_aligned_buffer = Cstruct.t
 
 type t = {
@@ -34,19 +32,18 @@ let connect id =
 let disconnect t =
   return ()
 
+let remap = function
+  | Error `No_directory_entry -> Error `Unknown_key
+  | Error (`Msg _) as e -> e
+  | Error e -> Error (`Msg (Format.asprintf "%a" Mirage_pp.pp_fs_error e))
+  | Ok l -> Ok l
+
 let mem {base} name =
-  Fs_common.mem_impl base name >|= function
-   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
-   | `Ok data -> `Ok data
+  Fs_common.mem_impl base name >|= remap
 
 let read {base} name off len =
-  Fs_common.read_impl base name off len >|= function
-   | `Error (`No_directory_entry (_, s))-> `Error (Unknown_key s)
-   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
-   | `Ok data -> `Ok data
+  let i = Int64.to_int in
+  Fs_common.read_impl base name (i off) (i len) >|= remap
 
 let size {base} name =
-  Fs_common.size_impl base name >|= function
-   | `Error (`No_directory_entry (_, s))-> `Error (Unknown_key s)
-   | `Error e -> `Error (Failure (Fs_common.string_of_error e))
-   | `Ok data -> `Ok data
+  Fs_common.size_impl base name >|= remap

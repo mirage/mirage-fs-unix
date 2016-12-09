@@ -1,8 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: f47ac9147b1dd8f16c9d3a6f60f39468)
-version = "1.2.1"
+# DO NOT EDIT (digest: 7166c8629789558f830b4b5de896eb24)
+version = "1.3.0"
 description = "Mirage filesystem driver for Unix"
-requires = "lwt lwt.unix mirage-types cstruct.lwt"
+requires = "lwt lwt.unix mirage-types cstruct.lwt mirage-runtime"
 archive(byte) = "mirage_fs_unix.cma"
 archive(byte, plugin) = "mirage_fs_unix.cma"
 archive(native) = "mirage_fs_unix.cmxa"

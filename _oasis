@@ -13,7 +13,7 @@ Library mirage_fs_unix
   Findlibname:        mirage-fs-unix
   InternalModules:    Fs_common
   Modules:            Kvro_fs_unix, FS_unix
-  BuildDepends:       lwt, lwt.unix, mirage-types, cstruct.lwt
+  BuildDepends:       lwt, lwt.unix, mirage-types, cstruct.lwt, mirage-runtime
 
 Executable test_fs_unix
   Path:               lib_test/
@@ -22,7 +22,7 @@ Executable test_fs_unix
   MainIs:             test_fs_unix.ml
   Custom:             true
   Build$:             flag(tests)
-  BuildDepends:       ptime, mirage-fs-unix, mirage-clock-unix, alcotest, oUnit
+  BuildDepends:       ptime, mirage-fs-unix, mirage-clock-unix, alcotest, oUnit, rresult
 
 Test fs_unix
   Run$:               flag(tests)

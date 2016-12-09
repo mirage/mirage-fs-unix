@@ -19,38 +19,8 @@
 open Lwt
 
 type +'a io = 'a Lwt.t
-type block_device_error = unit
 
-type error = [
-  | `Not_a_directory of string
-  | `Is_a_directory of string
-  | `Directory_not_empty of string
-  | `No_directory_entry of string * string
-  | `File_already_exists of string
-  | `No_space
-  | `Format_not_recognised of string
-  | `Unknown_error of string
-  | `Block_device of block_device_error
-]
 type page_aligned_buffer = Cstruct.t
-
-let string_of_error = function
-  | `Not_a_directory x         -> Printf.sprintf "%s is not a directory" x
-  | `Is_a_directory x          -> Printf.sprintf "%s is a directory" x
-  | `Directory_not_empty x     -> Printf.sprintf "The directory %s is not empty" x
-  | `No_directory_entry (x, y) -> Printf.sprintf "The directory %s contains no entry called %s" x y
-  | `File_already_exists x     -> Printf.sprintf "The filename %s already exists" x
-  | `No_space -> "There is insufficient free space to complete this operation"
-  | `Format_not_recognised x   -> Printf.sprintf "This disk is not formatted with %s" x
-  | `Unknown_error x           -> Printf.sprintf "Unknown error: %s" x
-  | `Block_device x            -> Printf.sprintf "Block device error"
-
-exception Error of error
-
-let (>>|) x f =
-  x >>= function
-  | `Ok x    -> f x
-  | `Error e -> fail (Error e)
 
 type t = {
   base: string
@@ -77,19 +47,19 @@ let rec create_directory path =
   let check_type p =
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
-    | Lwt_unix.S_DIR -> Lwt.return (`Ok ())
-    | _ -> Lwt.return (`Error (`File_already_exists path))
+    | Lwt_unix.S_DIR -> Lwt.return (Ok ())
+    | _ -> Lwt.return (Error `File_already_exists)
   in
   if Sys.file_exists path then check_type path
   else begin
     create_directory (Filename.dirname path) >>= function
-    | `Error e -> Lwt.return (`Error e) (* TODO: this leaks information *)
-    | `Ok () ->
+    | Error e -> Lwt.return (Error e)
+    | Ok () ->
       catch (fun () -> 
-        Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (`Ok ())
+        Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (Ok ())
       )
       (function
-        | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+        | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_write_error ex)
         | e -> Lwt.fail e
       )
   end
@@ -101,19 +71,19 @@ let mkdir {base} path =
 let open_file base path flags =
   let path = Fs_common.resolve_filename base path in
   create_directory (Filename.dirname path) >>= function
-  | `Error e -> Lwt.return (`Error e)
-  | `Ok () ->
-    catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> `Ok fd)
+  | Error e -> Lwt.return (Error e)
+  | Ok () ->
+    catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> Ok fd)
     (function
-      | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex path)
+      | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex)
       | e -> Lwt.fail e)
 
 let create {base} path =
   open_file base path [Lwt_unix.O_CREAT] >>= function
-  | `Ok fd ->
+  | Ok fd ->
     Lwt_unix.close fd >|= fun () ->
-    `Ok ()
-  | `Error e -> Lwt.return (`Error e)
+    Ok ()
+  | Error e -> Lwt.return (Error e)
 
 let stat {base} path0 =
   let path = Fs_common.resolve_filename base path0 in
@@ -123,9 +93,9 @@ let stat {base} path0 =
     let filename = Filename.basename path in
     let read_only = false in
     let directory = Sys.is_directory path in
-    return (`Ok { filename; read_only; directory; size })
+    return (Ok { filename; read_only; directory; size })
   )
-  (fun e -> Fs_common.err_catcher path e)
+  (fun e -> Fs_common.err_catcher e)
 
 let connect id =
   try if Sys.is_directory id then
@@ -139,9 +109,9 @@ let list_directory path =
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
     Lwt_stream.to_list s >>= fun l ->
-    return (`Ok l)
+    return (Ok l)
   ) else
-    return (`Ok [])
+    return (Ok [])
 
 
 let listdir {base} path =
@@ -155,15 +125,15 @@ let rec remove path =
     match stat.Lwt_unix.LargeFile.st_kind with
     | Lwt_unix.S_DIR ->
       list_directory full >>= (function
-          | `Ok files ->
+          | Ok files ->
             Lwt_list.iter_p (rm true full) files >>= fun () ->
             if rm_top_dir then Lwt_unix.rmdir full else Lwt.return_unit
-          | `Error e -> Lwt.fail e)
+          | Error e -> Lwt.fail e)
     | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
-    | _ -> Lwt.fail (Error (`Unknown_error "cannot remove unknown file type"))
+    | _ -> Lwt.fail (Failure "cannot remove this file, as its type is unknown")
   in
-  catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> `Ok ())
-  (fun e -> Fs_common.err_catcher path e)
+  catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
+  (fun e -> Fs_common.err_catcher e)
 
 let format {base} _ =
   assert (base <> "/");
@@ -176,8 +146,8 @@ let destroy {base} path =
 
 let write {base} path off buf =
   open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
-  | `Error e -> Lwt.return (`Error e)
-  | `Ok fd ->
+  | Error e -> Lwt.return (Error e)
+  | Ok fd ->
     catch
       (fun () ->
          Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
@@ -190,8 +160,8 @@ let write {base} path off buf =
              aux (off+n) (remaining-n))
          in
          aux 0 (String.length buf) >>= fun () ->
-         return (`Ok ()))
+         return (Ok ()))
       (fun e ->
          Lwt_unix.close fd >>= fun () ->
-         Fs_common.err_catcher path e
+         Fs_common.err_catcher e
       )
