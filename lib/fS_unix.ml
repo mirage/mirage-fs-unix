@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Lwt
+open Lwt.Infix
 
 type +'a io = 'a Lwt.t
 
@@ -26,14 +26,13 @@ type t = {
   base: string
 }
 
-let disconnect t =
-  return ()
+let disconnect _ = Lwt.return ()
 
 let read {base} name off len =
-  Fs_common.read_impl base name off len 
+  FS_common.read_impl base name off len
 
 let size {base} name =
-  Fs_common.size_impl base name
+  FS_common.size_impl base name
 
 type stat = {
   filename: string;
@@ -44,7 +43,7 @@ type stat = {
 
 (* all mkdirs are mkdir -p *)
 let rec create_directory path =
-  let check_type p =
+  let check_type path =
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
     | Lwt_unix.S_DIR -> Lwt.return (Ok ())
@@ -55,27 +54,27 @@ let rec create_directory path =
     create_directory (Filename.dirname path) >>= function
     | Error e -> Lwt.return (Error e)
     | Ok () ->
-      catch (fun () -> 
+      Lwt.catch (fun () ->
         Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (Ok ())
       )
       (function
-        | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_write_error ex)
+        | Unix.Unix_error (ex, _, _) -> Lwt.return (FS_common.map_write_error ex)
         | e -> Lwt.fail e
       )
   end
 
 let mkdir {base} path =
-  let path = Fs_common.resolve_filename base path in
+  let path = FS_common.resolve_filename base path in
   create_directory path
 
 let open_file base path flags =
-  let path = Fs_common.resolve_filename base path in
+  let path = FS_common.resolve_filename base path in
   create_directory (Filename.dirname path) >>= function
   | Error e -> Lwt.return (Error e)
   | Ok () ->
-    catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> Ok fd)
+    Lwt.catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> Ok fd)
     (function
-      | Unix.Unix_error (ex, _, _) -> return (Fs_common.map_error ex)
+      | Unix.Unix_error (ex, _, _) -> Lwt.return (FS_common.map_write_error ex)
       | e -> Lwt.fail e)
 
 let create {base} path =
@@ -86,39 +85,39 @@ let create {base} path =
   | Error e -> Lwt.return (Error e)
 
 let stat {base} path0 =
-  let path = Fs_common.resolve_filename base path0 in
-  catch (fun () -> 
+  let path = FS_common.resolve_filename base path0 in
+  Lwt.catch (fun () ->
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     let size = stat.Lwt_unix.LargeFile.st_size in
     let filename = Filename.basename path in
     let read_only = false in
     let directory = Sys.is_directory path in
-    return (Ok { filename; read_only; directory; size })
+    Lwt.return (Ok { filename; read_only; directory; size })
   )
-  (fun e -> Fs_common.err_catcher e)
+  (fun e -> FS_common.err_catcher e)
 
 let connect id =
   try if Sys.is_directory id then
-      return ({base = id})
+      Lwt.return ({base = id})
     else
-      fail_with ("Not a directory " ^  id)
-  with Sys_error _ -> fail_with ("Not an entity " ^ id)
+      Lwt.fail_with ("Not a directory " ^  id)
+  with Sys_error _ -> Lwt.fail_with ("Not an entity " ^ id)
 
 let list_directory path =
   if Sys.file_exists path then (
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
     Lwt_stream.to_list s >>= fun l ->
-    return (Ok l)
+    Lwt.return (Ok l)
   ) else
-    return (Ok [])
+    Lwt.return (Ok [])
 
 
 let listdir {base} path =
-  let path = Fs_common.resolve_filename base path in
+  let path = FS_common.resolve_filename base path in
   list_directory path
 
-let rec remove path =
+let remove path =
   let rec rm rm_top_dir base p =
     let full = Filename.concat base p in
     Lwt_unix.LargeFile.stat full >>= fun stat ->
@@ -132,23 +131,34 @@ let rec remove path =
     | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
     | _ -> Lwt.fail (Failure "cannot remove this file, as its type is unknown")
   in
-  catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
-  (fun e -> Fs_common.err_catcher e)
+  Lwt.catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
+  (fun e -> FS_common.write_err_catcher e)
 
 let format {base} _ =
   assert (base <> "/");
   assert (base <> "");
-  remove base
+  (* FIXME, format should return a write_error, see https://github.com/mirage/mirage/commit/96d025a8923b4ed138a13f7c825f466693c18ea2#commitcomment-20154024  *)
+  remove base >|= function
+  | Ok _ as x -> x
+  | Error e   ->
+    match e with
+    | `Is_a_directory
+    | `Not_a_directory
+    | `No_directory_entry
+    | `Msg _ as e          -> Error e
+    | `Directory_not_empty -> Error (`Msg "Cannot remove a non-empty directory")
+    | `File_already_exists -> Error (`Msg "Cannot create a file with a duplicate name")
+    | `No_space            -> Error (`Msg "No space left on the block device")
 
 let destroy {base} path =
-  let path = Fs_common.resolve_filename base path in
+  let path = FS_common.resolve_filename base path in
   remove path
 
 let write {base} path off buf =
   open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
   | Error e -> Lwt.return (Error e)
   | Ok fd ->
-    catch
+    Lwt.catch
       (fun () ->
          Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
          let buf = Cstruct.to_string buf in
@@ -160,8 +170,8 @@ let write {base} path off buf =
              aux (off+n) (remaining-n))
          in
          aux 0 (String.length buf) >>= fun () ->
-         return (Ok ()))
+         Lwt.return (Ok ()))
       (fun e ->
          Lwt_unix.close fd >>= fun () ->
-         Fs_common.err_catcher e
+         FS_common.write_err_catcher e
       )

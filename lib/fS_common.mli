@@ -1,5 +1,6 @@
 (*
  * Copyright (c) 2013 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2014 Thomas Gazagnaire <thomas@gazagnaire.org>
  * Copyright (c) 2014 Hannes Mehnert <hannes@mehnert.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -15,34 +16,13 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Lwt.Infix
+open V1.Fs
 
-type +'a io = 'a Lwt.t
-type page_aligned_buffer = Cstruct.t
-
-type t = {
-  base: string
-}
-
-let connect id =
-  (* TODO verify base directory exists *)
-  Lwt.return ({ base=id })
-
-let disconnect _ = Lwt.return ()
-
-let remap = function
-  | Error `No_directory_entry -> Error `Unknown_key
-  | Error (`Msg _) as e -> e
-  | Error e ->
-    Error (`Msg (Format.asprintf "%a" Mirage_pp.pp_fs_error (e :> V1.Fs.error)))
-  | Ok l -> Ok l
-
-let mem {base} name =
-  FS_common.mem_impl base name >|= remap
-
-let read {base} name off len =
-  let i = Int64.to_int in
-  FS_common.read_impl base name (i off) (i len) >|= remap
-
-let size {base} name =
-  FS_common.size_impl base name >|= remap
+val mem_impl: string -> string -> (bool,  error) result Lwt.t
+val read_impl: string -> string -> int -> int -> (Cstruct.t list, error) result Lwt.t
+val size_impl: string -> string -> (int64, error) result Lwt.t
+val resolve_filename: string -> string -> string
+val map_write_error: Unix.error -> ('a, write_error) result
+val map_error: Unix.error -> ('a, error) result
+val err_catcher: exn -> ('a, error) result Lwt.t
+val write_err_catcher: exn -> ('a, write_error) result Lwt.t

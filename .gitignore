@@ -9,11 +9,9 @@
 *.cmxs
 *.cmxa
 *.cmt
-setup.bin
-setup.data
-setup.log
-test_fs_unix.byte
 _build
 _tests/*.output
 _tests/test_directory/*-[0-9]*
 *.native
+*.install
+*~
