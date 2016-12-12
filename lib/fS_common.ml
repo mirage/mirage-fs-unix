@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Lwt
+open Lwt.Infix
 
 let split_string delimiter name =
   let len = String.length name in
@@ -34,7 +34,7 @@ let split_string delimiter name =
 
 let rec remove_dots parts outp =
   match parts, outp with
-  | ".."::r, a::rt -> remove_dots r  rt
+  | ".."::r, _::rt -> remove_dots r  rt
   | ".."::r, []    -> remove_dots r  []
   | "."::r , rt    -> remove_dots r  rt
   | r::rs  , rt    -> remove_dots rs (r :: rt)
@@ -48,8 +48,8 @@ let resolve_filename base filename =
 let map_error = function
   | Unix.EISDIR -> Error `Is_a_directory
   | Unix.ENOENT -> Error `No_directory_entry
-  | Unix.EUNKNOWNERR i -> Error (`Msg
-                                    ("UNIX errorno: " ^ string_of_int i))
+  | Unix.EUNKNOWNERR i -> Error (`Msg ("UNIX errorno: " ^ string_of_int i))
+  | e -> Error (`Msg ("UNIX error: " ^ Unix.error_message e))
 
 let map_write_error = function
   | Unix.EEXIST -> Error `File_already_exists
@@ -57,11 +57,15 @@ let map_write_error = function
   | Unix.ENOENT -> Error `No_directory_entry
   | Unix.ENOSPC -> Error `No_space
   | Unix.ENOTEMPTY -> Error `Directory_not_empty
-  | Unix.EUNKNOWNERR i -> Error (`Msg
-                                    ("UNIX errorno: " ^ string_of_int i))
+  | Unix.EUNKNOWNERR i -> Error (`Msg ("UNIX errorno: " ^ string_of_int i))
+  | e -> Error (`Msg ("Unix error: " ^ Unix.error_message e))
 
 let err_catcher = function
-  | Unix.Unix_error (ex, _, _) -> return (map_error ex)
+  | Unix.Unix_error (ex, _, _) -> Lwt.return (map_error ex)
+  | exn -> Lwt.fail exn
+
+let write_err_catcher = function
+  | Unix.Unix_error (ex, _, _) -> Lwt.return (map_write_error ex)
   | exn -> Lwt.fail exn
 
 let mem_impl base name =
@@ -74,7 +78,7 @@ let mem_impl base name =
           | e -> err_catcher e)
 
 let read_impl base name off reqd_len =
-  if reqd_len < 0 then return (Error (`Msg "can't read negative bytes"))
+  if reqd_len < 0 then Lwt.return (Error (`Msg "can't read negative bytes"))
   else begin
     let fullname = resolve_filename base name in
     Lwt.catch (fun () ->
@@ -87,23 +91,22 @@ let read_impl base name off reqd_len =
               match len with
               | 0 ->
                 Lwt_unix.close fd
-                >>= fun () -> return None
-              | len ->
-                return (Some (Cstruct.sub buf 0 (min len reqd_len)))
+                >>= fun () -> Lwt.return None
+              | len -> Lwt.return (Some (Cstruct.sub buf 0 (min len reqd_len)))
             )
         in
-        Lwt_stream.to_list st >>= fun bufs ->
+        Lwt_stream.to_list st >|= fun bufs ->
         match reqd_len with
-        | 0 -> return (Ok [])
-        | n -> return (Ok bufs) )
+        | 0 -> Ok []
+        | _ -> Ok bufs)
       err_catcher
   end
 
 let size_impl base name =
   let fullname = resolve_filename base name in
   Lwt.catch (fun () ->
-    Lwt_unix.LargeFile.stat fullname >>= fun stat ->
+    Lwt_unix.LargeFile.stat fullname >|= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
-      | Lwt_unix.S_REG -> return (Ok stat.Lwt_unix.LargeFile.st_size)
-      | _ -> return (Error `Is_a_directory))
+      | Lwt_unix.S_REG -> Ok stat.Lwt_unix.LargeFile.st_size
+      | _ -> Error `Is_a_directory)
     err_catcher

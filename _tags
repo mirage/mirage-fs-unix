@@ -1,48 +1,7 @@
-# OASIS_START
-# DO NOT EDIT (digest: 174d24ce08a0ed2b1c8fae8a799accf4)
-# Ignore VCS directories, you can use the same kind of rule outside
-# OASIS_START/STOP if you want to exclude directories that contains
-# useless stuff for the build process
-true: annot, bin_annot
-<**/.svn>: -traverse
-<**/.svn>: not_hygienic
-".bzr": -traverse
-".bzr": not_hygienic
-".hg": -traverse
-".hg": not_hygienic
-".git": -traverse
-".git": not_hygienic
-"_darcs": -traverse
-"_darcs": not_hygienic
-# Library mirage_fs_unix
-"lib/mirage_fs_unix.cmxs": use_mirage_fs_unix
-<lib/*.ml{,i,y}>: pkg_cstruct.lwt
-<lib/*.ml{,i,y}>: pkg_lwt
-<lib/*.ml{,i,y}>: pkg_lwt.unix
-<lib/*.ml{,i,y}>: pkg_mirage-runtime
-<lib/*.ml{,i,y}>: pkg_mirage-types
-# Executable test_fs_unix
-<lib_test/test_fs_unix.{native,byte}>: pkg_alcotest
-<lib_test/test_fs_unix.{native,byte}>: pkg_cstruct.lwt
-<lib_test/test_fs_unix.{native,byte}>: pkg_lwt
-<lib_test/test_fs_unix.{native,byte}>: pkg_lwt.unix
-<lib_test/test_fs_unix.{native,byte}>: pkg_mirage-clock-unix
-<lib_test/test_fs_unix.{native,byte}>: pkg_mirage-runtime
-<lib_test/test_fs_unix.{native,byte}>: pkg_mirage-types
-<lib_test/test_fs_unix.{native,byte}>: pkg_oUnit
-<lib_test/test_fs_unix.{native,byte}>: pkg_ptime
-<lib_test/test_fs_unix.{native,byte}>: pkg_rresult
-<lib_test/test_fs_unix.{native,byte}>: use_mirage_fs_unix
-<lib_test/*.ml{,i,y}>: pkg_alcotest
-<lib_test/*.ml{,i,y}>: pkg_cstruct.lwt
-<lib_test/*.ml{,i,y}>: pkg_lwt
-<lib_test/*.ml{,i,y}>: pkg_lwt.unix
-<lib_test/*.ml{,i,y}>: pkg_mirage-clock-unix
-<lib_test/*.ml{,i,y}>: pkg_mirage-runtime
-<lib_test/*.ml{,i,y}>: pkg_mirage-types
-<lib_test/*.ml{,i,y}>: pkg_oUnit
-<lib_test/*.ml{,i,y}>: pkg_ptime
-<lib_test/*.ml{,i,y}>: pkg_rresult
-<lib_test/*.ml{,i,y}>: use_mirage_fs_unix
-<lib_test/test_fs_unix.{native,byte}>: custom
-# OASIS_STOP
+true: warn_error(+1..49), warn(A-4-41-44)
+true: short_paths
+
+true: package(lwt lwt.unix mirage-types cstruct.lwt mirage-runtime)
+
+<lib>: include
+<lib_test/*>: package(unix ptime mirage-clock-unix alcotest oUnit rresult)

@@ -1,0 +1,6 @@
+PKG lwt.unix cstruct mirage-runtime mirage-types.lwt oUnit ptime rresult
+PKG ptime.clock.os
+
+S lib/
+S lib_test/
+B _build/**
