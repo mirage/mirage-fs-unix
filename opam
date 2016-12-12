@@ -9,7 +9,10 @@ doc:          "https://mirage.github.io/mirage-fs-unix/"
 tags:         [ "org:mirage" ]
 
 build: ["ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "false"]
-build-test: ["ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true"]
+build-test: [
+  ["ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true"]
+  ["ocaml" "pkg/pkg.ml" "test"]
+]
 depends: [
   "ocamlfind" {build}
   "cstruct" {>= "1.4.0"}

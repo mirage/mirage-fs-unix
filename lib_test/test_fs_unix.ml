@@ -16,7 +16,7 @@
 
 open Lwt
 
-let test_fs = "_build/_tests/test_directory"
+let test_fs = "lib_test/test_directory"
 let empty_file = "empty"
 let content_file = "content"
 let big_file = "big_file"
