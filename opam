@@ -17,7 +17,7 @@ depends: [
   "ocamlfind" {build}
   "cstruct" {>= "1.4.0"}
   "mirage-types" {>= "3.0.0"}
-  "mirage-types-lwt"
+  "mirage-types-lwt" {>= "3.0.0"}
   "mirage-runtime"
   "lwt"
   "rresult"           {test}

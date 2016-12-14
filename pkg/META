@@ -1,6 +1,6 @@
 version         = "%%VERSION_NUM%%"
 description     = "Mirage filesystem driver for Unix"
-requires        = "lwt lwt.unix mirage-types cstruct.lwt mirage-runtime"
+requires        = "lwt lwt.unix mirage-types mirage-types-lwt cstruct.lwt mirage-runtime"
 archive(byte)   = "mirage-fs-unix.cma"
 plugin(byte)    = "mirage-fs-unix.cma"
 plugin(native)  = "mirage-fs-unix.cmxs"
