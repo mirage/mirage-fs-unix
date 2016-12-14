@@ -69,8 +69,6 @@ let read_nonexistent_file file () =
     let chastisement = Printf.sprintf "reading a nonexistent file returned \
     `Msg %s; please make the error nicer" s in
     OUnit.assert_failure chastisement
-  | Error `Format_unknown ->
-    OUnit.assert_failure "low-level when trying to test nonexistent file read"
   | Error `No_directory_entry ->
     Lwt.return_unit
   | Error `Not_a_directory ->
@@ -399,20 +397,6 @@ let populate num depth fs =
   ) (gen_l [] num)
 
 
-let format_dir () =
-  let files = append_timestamp (test_fs ^ "1") in
-  Lwt_unix.mkdir files 0o755 >>= fun () ->
-  let cleanup () = Lwt_unix.rmdir files in
-  FS_impl.connect files >>= fun fs ->
-  populate 10 4 fs >>= fun () ->
-  FS_impl.format fs 1L >>= function
-  | Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "format failed"
-  | Ok () ->
-    FS_impl.listdir fs "/" >>= function
-    | Ok [] -> cleanup ()
-    | Ok _  -> OUnit.assert_failure "something exists after format"
-    | Error _ -> OUnit.assert_failure "error in listdir"
-
 let create () =
   FS_impl.connect test_fs >>= fun fs ->
   let fn = "createdoesnotyetexist" in
@@ -508,15 +492,12 @@ let () =
     "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
     "write_big_file", `Quick, lwt_run write_big_file;
   ] in
-  let format = [ "format_directory", `Quick, lwt_run format_dir ]
-  in
   Alcotest.run "FS_impl" [
     "connect", connect;
     "read", read;
     "size", size;
     "mkdir", mkdir;
     "destroy", destroy;
-    "format", format;
     "create", create;
     "listdir", listdir;
     "write", write;
