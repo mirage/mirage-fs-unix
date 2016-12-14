@@ -134,22 +134,6 @@ let remove path =
   Lwt.catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
   (fun e -> FS_common.write_err_catcher e)
 
-let format {base} _ =
-  assert (base <> "/");
-  assert (base <> "");
-  (* FIXME, format should return a write_error, see https://github.com/mirage/mirage/commit/96d025a8923b4ed138a13f7c825f466693c18ea2#commitcomment-20154024  *)
-  remove base >|= function
-  | Ok _ as x -> x
-  | Error e   ->
-    match e with
-    | `Is_a_directory
-    | `Not_a_directory
-    | `No_directory_entry
-    | `Msg _ as e          -> Error e
-    | `Directory_not_empty -> Error (`Msg "Cannot remove a non-empty directory")
-    | `File_already_exists -> Error (`Msg "Cannot create a file with a duplicate name")
-    | `No_space            -> Error (`Msg "No space left on the block device")
-
 let destroy {base} path =
   let path = FS_common.resolve_filename base path in
   remove path

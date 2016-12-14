@@ -17,8 +17,6 @@
 
 (** Loopback implementation of the FS signature. *)
 
-include V1.FS
-  with type +'a io = 'a Lwt.t
-   and type page_aligned_buffer = Cstruct.t
+include V1_LWT.FS
 
 val connect : string -> t io
