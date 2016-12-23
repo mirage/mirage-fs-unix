@@ -46,20 +46,43 @@ let resolve_filename base filename =
   let name = remove_dots parts [] |> String.concat "/" in
   Filename.concat base name
 
+type fs_error = [
+  | `Unix_error of Unix.error
+  | `Unix_errorno of int
+  | `Negative_bytes
+]
+
+type error = [ V1.Fs.error | fs_error ]
+type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+
+let pp_fs_error ppf = function
+  | `Unix_errorno i -> Fmt.pf ppf "UNIX errorno: %d" i
+  | `Unix_error e   -> Fmt.pf ppf "UNIX error: %s" @@ Unix.error_message e
+  | `Negative_bytes -> Fmt.string ppf "can't read negative bytes"
+
+let pp_error ppf = function
+  | #V1.Fs.error as e -> Mirage_pp.pp_fs_error ppf e
+  | #fs_error as e    -> pp_fs_error ppf e
+
+let pp_write_error ppf = function
+  | #V1.Fs.write_error as e -> Mirage_pp.pp_fs_write_error ppf e
+  | #fs_error as e          -> pp_fs_error ppf e
+  | `Directory_not_empty    -> Fmt.string ppf "XXX"
+
 let map_error = function
   | Unix.EISDIR -> Error `Is_a_directory
   | Unix.ENOENT -> Error `No_directory_entry
-  | Unix.EUNKNOWNERR i -> Error (`Msg ("UNIX errorno: " ^ string_of_int i))
-  | e -> Error (`Msg ("UNIX error: " ^ Unix.error_message e))
+  | Unix.EUNKNOWNERR i -> Error (`Unix_errorno i)
+  | e -> Error (`Unix_error e)
 
-let map_write_error = function
+let map_write_error: Unix.error -> ('a, write_error) result = function
   | Unix.EEXIST -> Error `File_already_exists
   | Unix.EISDIR -> Error `Is_a_directory
   | Unix.ENOENT -> Error `No_directory_entry
   | Unix.ENOSPC -> Error `No_space
   | Unix.ENOTEMPTY -> Error `Directory_not_empty
-  | Unix.EUNKNOWNERR i -> Error (`Msg ("UNIX errorno: " ^ string_of_int i))
-  | e -> Error (`Msg ("Unix error: " ^ Unix.error_message e))
+  | Unix.EUNKNOWNERR i -> Error (`Unix_errorno i)
+  | e -> Error (`Unix_error e)
 
 let err_catcher = function
   | Unix.Unix_error (ex, _, _) -> Lwt.return (map_error ex)
@@ -78,8 +101,8 @@ let mem_impl base name =
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Ok false)
           | e -> err_catcher e)
 
-let read_impl base name off reqd_len =
-  if reqd_len < 0 then Lwt.return (Error (`Msg "can't read negative bytes"))
+let read_impl base name off reqd_len: (Cstruct.t list, error) result Lwt.t =
+  if reqd_len < 0 then Lwt.return (Error `Negative_bytes)
   else begin
     let fullname = resolve_filename base name in
     Lwt.catch (fun () ->

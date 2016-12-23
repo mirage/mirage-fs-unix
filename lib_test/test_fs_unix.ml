@@ -28,8 +28,8 @@ let lwt_run f () = Lwt_main.run (f ())
 
 let do_or_fail = Rresult.R.get_ok
 
-let assert_fail e = OUnit.assert_failure @@ Format.asprintf "%a" Mirage_pp.pp_fs_error e
-let assert_write_fail e = OUnit.assert_failure @@ Format.asprintf "%a" Mirage_pp.pp_fs_write_error e
+let assert_fail e = OUnit.assert_failure @@ Format.asprintf "%a" FS_unix.pp_error e
+let assert_write_fail e = OUnit.assert_failure @@ Format.asprintf "%a" FS_unix.pp_write_error e
 
 let connect_present_dir () =
   FS_impl.connect test_fs >>= fun _fs -> Lwt.return_unit
@@ -65,10 +65,6 @@ let read_nonexistent_file file () =
     Please make sure there isn't actually a file named %s" ^ file)
   | Error (`Is_a_directory) ->
     OUnit.assert_failure "Unreasonable error response when trying to read a nonexistent file"
-  | Error (`Msg s) ->
-    let chastisement = Printf.sprintf "reading a nonexistent file returned \
-    `Msg %s; please make the error nicer" s in
-    OUnit.assert_failure chastisement
   | Error `No_directory_entry ->
     Lwt.return_unit
   | Error `Not_a_directory ->
@@ -106,7 +102,6 @@ let read_negative_bytes () =
   | Error `No_directory_entry ->
     OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make \
       sure %s is present in the test filesystem" content_file)
-  | Error (`Msg _) -> Lwt.return_unit
   | Error _ -> OUnit.assert_failure "reading negative bytes from a file returned some misclassified error"
 
 let read_too_many_bytes () =

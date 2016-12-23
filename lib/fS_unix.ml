@@ -26,6 +26,11 @@ type t = {
   base: string
 }
 
+type error = FS_common.error
+type write_error = FS_common.write_error
+let pp_error = FS_common.pp_error
+let pp_write_error = FS_common.pp_write_error
+
 let disconnect _ = Lwt.return ()
 
 let read {base} name off len =

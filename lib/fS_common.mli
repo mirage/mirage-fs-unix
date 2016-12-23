@@ -17,8 +17,17 @@
  *)
 
 open Result
-open V1.Fs
 
+type fs_error = [
+  | `Unix_error of Unix.error
+  | `Unix_errorno of int
+  | `Negative_bytes
+]
+type error = [ V1.Fs.error | fs_error ]
+type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+
+val pp_error: error Fmt.t
+val pp_write_error: write_error Fmt.t
 val mem_impl: string -> string -> (bool,  error) result Lwt.t
 val read_impl: string -> string -> int -> int -> (Cstruct.t list, error) result Lwt.t
 val size_impl: string -> string -> (int64, error) result Lwt.t
