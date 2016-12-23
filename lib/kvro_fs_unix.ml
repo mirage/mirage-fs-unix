@@ -20,6 +20,12 @@ open Lwt.Infix
 type +'a io = 'a Lwt.t
 type page_aligned_buffer = Cstruct.t
 
+type error = [ V1.Kv_ro.error | FS_common.error ]
+
+let pp_error ppf = function
+  | #V1.Kv_ro.error as e  -> Mirage_pp.pp_kv_ro_error ppf e
+  | #FS_common.error as e -> FS_common.pp_error ppf e
+
 type t = {
   base: string
 }
@@ -30,19 +36,17 @@ let connect id =
 
 let disconnect _ = Lwt.return ()
 
-let remap = function
-  | Error `No_directory_entry -> Error `Unknown_key
-  | Error (`Msg _) as e -> e
-  | Error e ->
-    Error (`Msg (Format.asprintf "%a" Mirage_pp.pp_fs_error (e :> V1.Fs.error)))
+let remap name = function
+  | Error `No_directory_entry -> Error (`Unknown_key name)
+  | Error e -> Error (e :> error)
   | Ok l -> Ok l
 
 let mem {base} name =
-  FS_common.mem_impl base name >|= remap
+  FS_common.mem_impl base name >|= remap name
 
 let read {base} name off len =
   let i = Int64.to_int in
-  FS_common.read_impl base name (i off) (i len) >|= remap
+  FS_common.read_impl base name (i off) (i len) >|= remap name
 
 let size {base} name =
-  FS_common.size_impl base name >|= remap
+  FS_common.size_impl base name >|= remap name
