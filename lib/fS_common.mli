@@ -16,6 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+open Result
 open V1.Fs
 
 val mem_impl: string -> string -> (bool,  error) result Lwt.t

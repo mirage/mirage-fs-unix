@@ -17,6 +17,7 @@
  *)
 
 open Lwt.Infix
+open Result
 
 let split_string delimiter name =
   let len = String.length name in
