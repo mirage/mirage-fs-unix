@@ -69,6 +69,8 @@ let read_nonexistent_file file () =
     Lwt.return_unit
   | Error `Not_a_directory ->
     OUnit.assert_failure "not-a-directory when trying to read a non-existent file"
+  | Error _ ->
+    OUnit.assert_failure "fs errors"
 
 let read_empty_file () =
   FS_impl.connect test_fs >>= fun fs ->
@@ -101,7 +103,8 @@ let read_negative_bytes () =
     OUnit.assert_failure "reading -5 bytes from a non-empty file returned some cstructs"
   | Error `No_directory_entry ->
     OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make \
-      sure %s is present in the test filesystem" content_file)
+                                          sure %s is present in the test filesystem" content_file)
+  | Error `Negative_bytes -> Lwt.return_unit
   | Error _ -> OUnit.assert_failure "reading negative bytes from a file returned some misclassified error"
 
 let read_too_many_bytes () =
