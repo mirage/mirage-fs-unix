@@ -14,7 +14,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Lwt
+open Lwt.Infix
+open Mirage_fs
 
 let test_fs = "test/test_directory"
 let empty_file = "empty"
@@ -28,29 +29,32 @@ let lwt_run f () = Lwt_main.run (f ())
 
 let do_or_fail = Rresult.R.get_ok
 
-let assert_fail e = OUnit.assert_failure @@ Format.asprintf "%a" FS_unix.pp_error e
-let assert_write_fail e = OUnit.assert_failure @@ Format.asprintf "%a" FS_unix.pp_write_error e
+let failf fmt = Fmt.kstrf Alcotest.fail fmt
+let assert_fail e = failf "%a" FS_unix.pp_error e
+let assert_write_fail e = failf "%a" FS_unix.pp_write_error e
 
 let connect_present_dir () =
   FS_impl.connect test_fs >>= fun _fs -> Lwt.return_unit
 
-let clock =
-  lwt_run (fun () -> Pclock.connect ()) ()
+let clock = lwt_run (fun () -> Pclock.connect ()) ()
 
 let append_timestamp s =
-  Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) (Ptime.v (Pclock.now_d_ps clock))
+  let now = Ptime.v (Pclock.now_d_ps clock) in
+  Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) now
 
 let full_path dirname filename = dirname ^ "/" ^ filename
 
 let just_one_and_is expected read_bufs =
-  OUnit.assert_equal ~printer:string_of_int 1 (List.length read_bufs);
-  OUnit.assert_equal ~printer:(fun a -> a)
+  Alcotest.(check int) __LOC__ 1 (List.length read_bufs);
+  Alcotest.(check string) __LOC__
     expected (Cstruct.to_string (List.hd read_bufs));
   Lwt.return read_bufs
 
 let expect_error_connecting where () =
   Lwt.catch
-    (fun () -> FS_impl.connect where >>= fun _ -> fail_with "expected error")
+    (fun () ->
+       FS_impl.connect where >>= fun _ ->
+       Lwt.fail_with "expected error")
     (fun _ -> Lwt.return_unit)
 
 let connect_to_empty_string = expect_error_connecting ""
@@ -61,38 +65,38 @@ let read_nonexistent_file file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs file 0 1 >>= function
   | Ok _ ->
-    OUnit.assert_failure ("read returned Ok when no file was expected. \
-    Please make sure there isn't actually a file named %s" ^ file)
+    failf "read returned Ok when no file was expected. Please make sure there \
+           isn't actually a file  named %s" file
   | Error (`Is_a_directory) ->
-    OUnit.assert_failure "Unreasonable error response when trying to read a nonexistent file"
+    failf "Unreasonable error response when trying to read a nonexistent file"
   | Error `No_directory_entry ->
     Lwt.return_unit
   | Error `Not_a_directory ->
-    OUnit.assert_failure "not-a-directory when trying to read a non-existent file"
-  | Error _ ->
-    OUnit.assert_failure "fs errors"
+    failf "not-a-directory when trying to read a non-existent file"
+  | Error _ -> failf "fs errors"
 
 let read_empty_file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs empty_file 0 1 >>= function
   | Ok [] -> Lwt.return_unit
-  | Ok _  ->
-    OUnit.assert_failure "reading an empty file returned some cstructs"
+  | Ok _  -> failf "reading an empty file returned some cstructs"
   | Error `No_directory_entry ->
-    OUnit.assert_failure (Printf.sprintf "read failed for a present but empty file; please make \
-      sure %s is present in the test filesystem" empty_file)
-  | Error _ -> OUnit.assert_failure "unhelpful error returned from nonzero size read on an empty file"
+    failf "read failed for a present but empty file; please make sure %s \
+           is present in the test filesystem" empty_file
+  | Error _ ->
+    failf "unhelpful error returned from nonzero size read on an empty file"
 
 let read_zero_bytes () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 0 >>= function
   | Ok [] -> Lwt.return_unit
   | Ok _  ->
-    OUnit.assert_failure "reading zero bytes from a non-empty file returned some cstructs"
+    failf "reading zero bytes from a non-empty file returned some cstructs"
   | Error `No_directory_entry ->
-    OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make \
-      sure %s is present in the test filesystem" content_file)
-  | Error _ -> OUnit.assert_failure "unhelpful error returned from reading 0 bytes of a non-empty file"
+    failf "read failed for a present file; please make  sure %s is present \
+           in the test filesystem" content_file
+  | Error _ ->
+    failf "unhelpful error returned from reading 0 bytes of a non-empty file"
 
 (* reasonable responses are Ok [] or an error *)
 let read_negative_bytes () =
@@ -100,24 +104,25 @@ let read_negative_bytes () =
   FS_impl.read fs content_file 0 (-5) >>= function
   | Ok [] -> Lwt.return_unit
   | Ok  _ ->
-    OUnit.assert_failure "reading -5 bytes from a non-empty file returned some cstructs"
+    failf "reading -5 bytes from a non-empty file returned some cstructs"
   | Error `No_directory_entry ->
-    OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make \
-                                          sure %s is present in the test filesystem" content_file)
+    failf "read failed for a present file; please make sure %s is present in \
+           the test filesystem" content_file
   | Error `Negative_bytes -> Lwt.return_unit
-  | Error _ -> OUnit.assert_failure "reading negative bytes from a file returned some misclassified error"
+  | Error _ ->
+    failf "reading negative bytes from a file returned some misclassified error"
 
 let read_too_many_bytes () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 0 65535 >>= function
   | Ok bufs ->
-    OUnit.assert_equal ~printer:string_of_int 1 (List.length bufs);
-    OUnit.assert_equal ~printer:string_of_int 13 (Cstruct.len (List.hd bufs));
+    Alcotest.(check int) __LOC__ 1 (List.length bufs);
+    Alcotest.(check int) __LOC__ 13 (Cstruct.len (List.hd bufs));
     Lwt.return_unit
   | Error `No_directory_entry ->
-    OUnit.assert_failure (Printf.sprintf "read failed for a present file; please make \
-      sure %s is present in the test filesystem" content_file)
-  | Error _ -> OUnit.assert_failure "read beyond EOF for a valid file returned an error"
+    failf "read failed for a present file; please make sure %s is present in \
+           the test filesystem" content_file
+  | Error _ -> failf "read beyond EOF for a valid file returned an error"
 
 let read_at_offset () =
   FS_impl.connect test_fs >>= fun fs ->
@@ -133,39 +138,37 @@ let read_at_offset_past_eof () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.read fs content_file 50 10 >|= do_or_fail >>= function
   | [] -> Lwt.return_unit
-  | _ -> OUnit.assert_failure "read returned content when we asked for an offset past EOF"
+  | _  -> failf "read returned content when we asked for an offset past EOF"
 
 let read_big_file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs big_file >|= do_or_fail >>= fun size ->
   FS_impl.read fs big_file 0 10000 >|= do_or_fail >>= function
-  | [] -> OUnit.assert_failure "read returned nothing for a large file"
+  | [] -> failf "read returned nothing for a large file"
   | (hd::tl::[]) ->
-    OUnit.assert_equal ~printer:string_of_int (Int64.to_int size)
-      ((Cstruct.len hd) + (Cstruct.len tl));
+    Alcotest.(check int) __LOC__
+      (Int64.to_int size) ((Cstruct.len hd) + (Cstruct.len tl));
     Lwt.return_unit
-  | _ -> OUnit.assert_failure "read didn't split a large file across pages as expected"
+  | _ -> failf "read didn't split a large file across pages as expected"
 
 let size_nonexistent_file () =
   FS_impl.connect test_fs >>= fun fs ->
   let filename = "^#$\000not a file!!!. &;" in
   FS_impl.size fs filename >>= function
-  | Ok d ->
-    OUnit.assert_failure (Printf.sprintf "Got a size of %s for absent file"
-                            (Int64.to_string d))
+  | Ok d -> failf "Got a size of %Ld for absent file" d
   | Error `No_directory_entry -> Lwt.return_unit
   | Error e -> assert_fail e
 
 let size_empty_file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs empty_file >|= do_or_fail >>= fun n ->
-  OUnit.assert_equal ~msg:"size of an empty file" ~printer:Int64.to_string (Int64.zero) n;
+  Alcotest.(check int64) "size of an empty file" (Int64.zero) n;
   Lwt.return_unit
 
 let size_small_file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs content_file >|= do_or_fail >>= fun n ->
-  OUnit.assert_equal ~msg:"size of a small file" ~printer:Int64.to_string (Int64.of_int 13) n;
+  Alcotest.(check int64) "size of a small file" (Int64.of_int 13) n;
   Lwt.return_unit
 
 let size_a_directory () =
@@ -173,13 +176,12 @@ let size_a_directory () =
   FS_impl.size fs directory >>= function
   | Error `Is_a_directory -> Lwt.return_unit
   | Error e -> assert_fail e
-  | Ok n -> OUnit.assert_failure
-               (Printf.sprintf "got size %s on a directory" (Int64.to_string n))
+  | Ok n -> failf "got size %Ld on a directory" n
 
 let size_big_file () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.size fs big_file >|= do_or_fail >>= fun size ->
-  OUnit.assert_equal ~printer:Int64.to_string (Int64.of_int 5000) size;
+  Alcotest.(check int64) __LOC__ (Int64.of_int 5000) size;
   Lwt.return_unit
 
 let mkdir_already_empty_directory () =
@@ -194,14 +196,15 @@ let mkdir_over_file () =
   | Ok () ->
     (* really?  We're already in trouble, but let's see how bad it is *)
     FS_impl.stat fs empty_file >>= function
-    | Error _ -> OUnit.assert_failure "mkdir reported success in making a \
-    directory over an existing file, and now the location isn't even stat-able"
+    | Error _ ->
+      failf "mkdir reported success in making a directory over an existing \
+             file, and now the location isn't even stat-able"
     | Ok s ->
-      let open FS_impl in
       match s.directory with
-      | true -> OUnit.assert_failure "mkdir made a dir over top of an existing file"
+      | true -> failf "mkdir made a dir over top of an existing file"
       | false ->
-        OUnit.assert_failure "mkdir falsely reported success making a directory over an existing file"
+        failf "mkdir falsely reported success making a directory over an \
+               existing file"
 
 let mkdir_over_directory_with_contents () =
   FS_impl.connect test_fs >>= fun fs ->
@@ -214,8 +217,8 @@ let mkdir_over_directory_with_contents () =
   | Ok () -> (* did we clobber the subdirectory that was here? *)
     FS_impl.stat fs (tempdir ^ "/cool tapes") >>= function
     | Error `No_directory_entry ->
-      OUnit.assert_failure "mkdir silently clobbered an existing directory and all of \
-          its contents.  That is bad.  Please fix it."
+      failf "mkdir silently clobbered an existing directory and all of its \
+             contents. That is bad. Please fix it."
     | Error e -> assert_fail e
     | Ok _    -> Lwt.return_unit
 
@@ -229,9 +232,8 @@ let mkdir_credibly () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
   FS_impl.stat fs dirname >|= do_or_fail >>= fun s ->
-  let open FS_impl in
-  OUnit.assert_equal true s.directory;
-  OUnit.assert_equal dirname s.filename;
+  Alcotest.(check bool) __LOC__ true s.directory;
+  Alcotest.(check string) __LOC__ dirname s.filename;
   Lwt.return_unit
 
 let write_not_a_dir () =
@@ -241,18 +243,18 @@ let write_not_a_dir () =
   let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|= do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|=
+  do_or_fail >>= fun () ->
   FS_impl.stat fs full_path >>= function
   | Error `No_directory_entry ->
-    OUnit.assert_failure "Write to a nonexistent dir falsely claimed success"
+    failf "Write to a nonexistent dir falsely claimed success"
   | Error _ ->
-    OUnit.assert_failure "Write to nonexistent dir claimed success, but \
-        attempting to stat it fails"
+    failf "Write to nonexistent dir claimed success, but attempting to stat \
+           it fails"
   | Ok _ ->
     FS_impl.read fs full_path 0 4096 >|= do_or_fail >>= fun bufs ->
-    OUnit.assert_equal 1 (List.length bufs);
-    OUnit.assert_equal ~printer:(fun a -> a) content (Cstruct.to_string
-                                                        (List.hd bufs));
+    Alcotest.(check int) __LOC__  1 (List.length bufs);
+    Alcotest.(check string) __LOC__ content (Cstruct.to_string (List.hd bufs));
     Lwt.return_unit
 
 let write_zero_bytes () =
@@ -262,23 +264,22 @@ let write_zero_bytes () =
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
   FS_impl.write fs full_path 0 (Cstruct.create 0) >|= do_or_fail >>= fun () ->
-  let open FS_impl in
   (* make sure it's size 0 *)
   FS_impl.stat fs full_path >>= function
-  | Ok stat ->
-    OUnit.assert_equal ~printer:Int64.to_string Int64.zero stat.size;
+  | Ok stat -> Alcotest.(check int64) __LOC__ Int64.zero stat.size;
     Lwt.return_unit
   | Error `No_directory_entry ->
-    OUnit.assert_failure "write claimed to create a file that the fs then couldn't find"
+    failf "write claimed to create a file that the fs then couldn't find"
   | Error _ ->
-    OUnit.assert_failure "write claimed to create a file, but trying to stat it fails"
+    failf "write claimed to create a file, but trying to stat it fails"
 
 let write_contents_correct () =
   let dirname = append_timestamp "write_contents_correct" in
   let full_path = full_path dirname "short_phrase" in
   let phrase = "standing here on this frozen lake" in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string phrase) >|= do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 0 (Cstruct.of_string phrase) >|=
+  do_or_fail >>= fun () ->
   FS_impl.read fs full_path 0 (String.length phrase) >|= do_or_fail >>=
   just_one_and_is phrase >>= fun _ -> Lwt.return_unit
 
@@ -305,8 +306,10 @@ let write_at_offset_past_eof () =
   let content = "repetition for its own sake." in
   let replacement = "ating yourself is super fun!" in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 4 (Cstruct.of_string replacement) >|= do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|=
+  do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 4 (Cstruct.of_string replacement) >|=
+  do_or_fail >>= fun () ->
   FS_impl.stat fs full_path >|= do_or_fail >>= fun _ ->
   FS_impl.read fs full_path 0 4096 >|= do_or_fail >>= fun read_bufs ->
   just_one_and_is ("repe" ^ replacement) read_bufs >>= fun _ ->
@@ -322,10 +325,9 @@ let write_overwrite_dir () =
   | Ok () -> (* check to see whether it actually overwrote or just failed to
                  return an error *)
     FS_impl.stat fs dirname >|= do_or_fail >>= fun s ->
-    let open FS_impl in
     match s.directory with
-    | true -> OUnit.assert_failure "write falsely reported success overwriting a directory"
-    | false -> OUnit.assert_failure "write overwrite an entire directory!"
+    | true  -> failf "write falsely reported success overwriting a directory"
+    | false -> failf "write overwrite an entire directory!"
 
 let write_at_offset_is_eof () =
   let dirname = append_timestamp "write_at_offset_is_eof" in
@@ -347,8 +349,10 @@ let write_at_offset_beyond_eof () =
   let filename = "database.sql" in
   let full_path = full_path dirname filename in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string "antici") >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 10 (Cstruct.of_string "pation") >|= do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 0 (Cstruct.of_string "antici") >|=
+  do_or_fail >>= fun () ->
+  FS_impl.write fs full_path 10 (Cstruct.of_string "pation") >|=
+  do_or_fail >>= fun () ->
   FS_impl.read fs full_path 0 4096 >|= do_or_fail
   >>= just_one_and_is "antici\000\000\000\000pation" >>= fun _ -> Lwt.return_unit
 
@@ -369,15 +373,15 @@ let write_big_file () =
   FS_impl.write fs full_path 0 first_page >|= do_or_fail >>= fun () ->
   FS_impl.size fs full_path >|= do_or_fail >>= fun sz ->
   let check_chars buf a b c =
-    OUnit.assert_equal 'A' (Cstruct.get_char buf a);
-    OUnit.assert_equal 'B' (Cstruct.get_char buf b);
-    OUnit.assert_equal 'C' (Cstruct.get_char buf c)
+    Alcotest.(check char) __LOC__ 'A' (Cstruct.get_char buf a);
+    Alcotest.(check char) __LOC__ 'B' (Cstruct.get_char buf b);
+    Alcotest.(check char) __LOC__ 'C' (Cstruct.get_char buf c)
   in
-  OUnit.assert_equal ~printer:Int64.to_string (Int64.of_int how_big) sz;
+  Alcotest.(check int64) __LOC__ (Int64.of_int how_big) sz;
   FS_impl.read fs full_path 0 how_big >|= do_or_fail >>= function
-  | [] -> OUnit.assert_failure "claimed a big file was empty on read"
+  | [] -> failf "claimed a big file was empty on read"
   | _::buf::[]-> check_chars buf 1 2 3; Lwt.return_unit
-  | _ -> OUnit.assert_failure "read sent back a nonsensible number of buffers"
+  | _ -> failf "read sent back a nonsensible number of buffers"
 
 let populate num depth fs =
   let rec gen_d pref = function
@@ -399,9 +403,9 @@ let create () =
   FS_impl.connect test_fs >>= fun fs ->
   let fn = "createdoesnotyetexist" in
   FS_impl.create fs fn  >>= function
-  | Error _ -> OUnit.assert_failure "create failed"
+  | Error _ -> failf "create failed"
   | Ok () -> FS_impl.destroy fs fn >>= function
-    | Error _ -> OUnit.assert_failure "destroy after create failed"
+    | Error _ -> failf "destroy after create failed"
     | Ok () -> Lwt.return_unit
 
 let destroy () =
@@ -411,12 +415,12 @@ let destroy () =
   FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
   FS_impl.destroy fs "/" >>= function
-  | Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "create failed"
+  | Error _ -> cleanup () >>= fun () -> failf "create failed"
   | Ok () ->
     FS_impl.listdir fs "/" >>= function
     | Ok []   -> cleanup ()
-    | Ok _    -> OUnit.assert_failure "something exists after destroy"
-    | Error _ -> OUnit.assert_failure "error in listdir"
+    | Ok _    -> failf "something exists after destroy"
+    | Error _ -> failf "error in listdir"
 
 let destroy_a_bit () =
   let files = append_timestamp (test_fs ^ "3") in
@@ -425,17 +429,18 @@ let destroy_a_bit () =
   FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
   FS_impl.listdir fs "/" >>= (function
-    | Ok xs -> Lwt.return (List.length xs)
-    | Error _ -> OUnit.assert_failure "error in listdir") >>= fun files ->
+      | Ok xs -> Lwt.return (List.length xs)
+      | Error _ -> failf "error in listdir") >>= fun files ->
   FS_impl.create fs "barf" >>= function
-  | Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "create failed"
+  | Error _ -> cleanup () >>= fun () -> failf "create failed"
   | Ok ()   -> FS_impl.destroy fs "barf" >>= (function
-      | Error _ -> cleanup () >>= fun () -> OUnit.assert_failure "destroy failed"
+      | Error _ -> cleanup () >>= fun () -> failf "destroy failed"
       | Ok ()   -> FS_impl.listdir fs "/" >>= (function
           | Ok xs when List.length xs = files -> cleanup ()
-          | Ok _ -> OUnit.assert_failure "something wrong in destroy: destroy followed by create is not well behaving"
-          | Error _ -> OUnit.assert_failure "error in listdir"))
-
+          | Ok _ ->
+            failf "something wrong in destroy: destroy  followed by create is \
+                   not well behaving"
+          | Error _ -> failf "error in listdir"))
 
 let () =
   let connect = [
