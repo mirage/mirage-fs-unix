@@ -17,14 +17,18 @@
 
 (** Loopback implementation of the FS signature. *)
 
+[@@@ocaml.warning "-34"]
+
 type fs_error = [
   | `Unix_error of Unix.error
   | `Unix_errorno of int
   | `Negative_bytes
 ]
-type error = [ V1.Fs.error | fs_error ]
-type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+type error = [ Mirage_fs.error | fs_error ]
+type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
 
-include V1_LWT.FS with type error := error and type write_error := write_error
+include Mirage_fs_lwt.S
+  with type error := error
+   and type write_error := write_error
 
-val connect : string -> t io
+val connect : string -> t Lwt.t

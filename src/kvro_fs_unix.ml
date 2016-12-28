@@ -20,10 +20,10 @@ open Lwt.Infix
 type +'a io = 'a Lwt.t
 type page_aligned_buffer = Cstruct.t
 
-type error = [ V1.Kv_ro.error | FS_common.error ]
+type error = [ Mirage_kv.error | FS_common.error ]
 
 let pp_error ppf = function
-  | #V1.Kv_ro.error as e  -> Mirage_pp.pp_kv_ro_error ppf e
+  | #Mirage_kv.error as e -> Mirage_kv.pp_error ppf e
   | #FS_common.error as e -> FS_common.pp_error ppf e
 
 type t = {

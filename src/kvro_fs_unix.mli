@@ -14,8 +14,5 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-include V1.KV_RO
-  with type +'a io = 'a Lwt.t
-   and type page_aligned_buffer = Cstruct.t
-
-val connect : string -> t io
+include Mirage_kv_lwt.RO
+val connect : string -> t Lwt.t

@@ -1,7 +1,7 @@
-true: warn_error(+1..49-34), warn(A-4-41-44)
+true: warn_error(+1..49+60), warn(A-4-41-44)
 true: short_paths
 
-true: package(lwt lwt.unix mirage-types mirage-types-lwt cstruct.lwt mirage-runtime)
+true: package(lwt lwt.unix mirage-kv-lwt mirage-fs-lwt cstruct.lwt)
 
 <src>: include
-<test/*>: package(unix ptime mirage-clock-unix alcotest oUnit rresult)
+<test/*>: package(unix ptime mirage-clock-unix alcotest rresult)

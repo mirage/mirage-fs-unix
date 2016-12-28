@@ -40,13 +40,6 @@ let read {base} name off len =
 let size {base} name =
   FS_common.size_impl base name
 
-type stat = {
-  filename: string;
-  read_only: bool;
-  directory: bool;
-  size: int64;
-}
-
 (* all mkdirs are mkdir -p *)
 let rec create_directory path =
   let check_type path =
@@ -98,7 +91,7 @@ let stat {base} path0 =
     let filename = Filename.basename path in
     let read_only = false in
     let directory = Sys.is_directory path in
-    Lwt.return (Ok { filename; read_only; directory; size })
+    Lwt.return (Ok { Mirage_fs.filename; read_only; directory; size })
   )
   (fun e -> FS_common.err_catcher e)
 

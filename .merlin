@@ -1,5 +1,5 @@
-PKG lwt.unix cstruct mirage-runtime mirage-types-lwt oUnit ptime rresult
-PKG ptime.clock.os
+PKG lwt.unix cstruct mirage-fs-lwt mirage-kv-lwt ptime rresult
+PKG ptime.clock.os mirage-clock-unix alcotest
 
 S src/
 S test/

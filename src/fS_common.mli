@@ -23,8 +23,8 @@ type fs_error = [
   | `Unix_errorno of int
   | `Negative_bytes
 ]
-type error = [ V1.Fs.error | fs_error ]
-type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+type error = [ Mirage_fs.error | fs_error ]
+type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
 
 val pp_error: error Fmt.t
 val pp_write_error: write_error Fmt.t
