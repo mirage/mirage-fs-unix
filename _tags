@@ -3,5 +3,5 @@ true: short_paths
 
 true: package(lwt lwt.unix mirage-types mirage-types-lwt cstruct.lwt mirage-runtime)
 
-<lib>: include
-<lib_test/*>: package(unix ptime mirage-clock-unix alcotest oUnit rresult)
+<src>: include
+<test/*>: package(unix ptime mirage-clock-unix alcotest oUnit rresult)
