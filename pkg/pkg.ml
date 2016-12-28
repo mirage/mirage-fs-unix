@@ -10,6 +10,6 @@ let opam =
 let () =
   Pkg.describe ~opams:[opam] "mirage-fs-unix" @@ fun c ->
   Ok [
-    Pkg.mllib ~api:["FS_unix"; "Kvro_fs_unix"] "lib/mirage-fs-unix.mllib";
-    Pkg.test  "lib_test/test_fs_unix";
+    Pkg.mllib ~api:["FS_unix"; "Kvro_fs_unix"] "src/mirage-fs-unix.mllib";
+    Pkg.test  "test/test_fs_unix";
   ]

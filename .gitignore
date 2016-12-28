@@ -10,8 +10,8 @@
 *.cmxa
 *.cmt
 _build
-lib_test/*.output
-lib_test/test_directory/*-[0-9]*
+test/*.output
+test/test_directory/*-[0-9]*
 *.native
 *.install
 *~

@@ -1,5 +1,6 @@
 (*
- * Copyright (c) 2013 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2013-2014 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2014      Thomas Gazagnaire <thomas@gazagnaire.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,8 +15,20 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-include V1.KV_RO
-  with type +'a io = 'a Lwt.t
-   and type page_aligned_buffer = Cstruct.t
+(** Loopback implementation of the FS signature. *)
 
-val connect : string -> t io
+[@@@ocaml.warning "-34"]
+
+type fs_error = [
+  | `Unix_error of Unix.error
+  | `Unix_errorno of int
+  | `Negative_bytes
+]
+type error = [ Mirage_fs.error | fs_error ]
+type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
+
+include Mirage_fs_lwt.S
+  with type error := error
+   and type write_error := write_error
+
+val connect : string -> t Lwt.t

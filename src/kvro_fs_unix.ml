@@ -1,6 +1,5 @@
 (*
  * Copyright (c) 2013 Anil Madhavapeddy <anil@recoil.org>
- * Copyright (c) 2014 Thomas Gazagnaire <thomas@gazagnaire.org>
  * Copyright (c) 2014 Hannes Mehnert <hannes@mehnert.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -16,23 +15,38 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Result
+open Lwt.Infix
 
-type fs_error = [
-  | `Unix_error of Unix.error
-  | `Unix_errorno of int
-  | `Negative_bytes
-]
-type error = [ V1.Fs.error | fs_error ]
-type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+type +'a io = 'a Lwt.t
+type page_aligned_buffer = Cstruct.t
 
-val pp_error: error Fmt.t
-val pp_write_error: write_error Fmt.t
-val mem_impl: string -> string -> (bool,  error) result Lwt.t
-val read_impl: string -> string -> int -> int -> (Cstruct.t list, error) result Lwt.t
-val size_impl: string -> string -> (int64, error) result Lwt.t
-val resolve_filename: string -> string -> string
-val map_write_error: Unix.error -> ('a, write_error) result
-val map_error: Unix.error -> ('a, error) result
-val err_catcher: exn -> ('a, error) result Lwt.t
-val write_err_catcher: exn -> ('a, write_error) result Lwt.t
+type error = [ Mirage_kv.error | FS_common.error ]
+
+let pp_error ppf = function
+  | #Mirage_kv.error as e -> Mirage_kv.pp_error ppf e
+  | #FS_common.error as e -> FS_common.pp_error ppf e
+
+type t = {
+  base: string
+}
+
+let connect id =
+  (* TODO verify base directory exists *)
+  Lwt.return ({ base=id })
+
+let disconnect _ = Lwt.return ()
+
+let remap name = function
+  | Error `No_directory_entry -> Error (`Unknown_key name)
+  | Error e -> Error (e :> error)
+  | Ok l -> Ok l
+
+let mem {base} name =
+  FS_common.mem_impl base name >|= remap name
+
+let read {base} name off len =
+  let i = Int64.to_int in
+  FS_common.read_impl base name (i off) (i len) >|= remap name
+
+let size {base} name =
+  FS_common.size_impl base name >|= remap name

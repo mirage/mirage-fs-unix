@@ -16,14 +16,12 @@ build-test: [
 depends: [
   "ocamlfind" {build}
   "cstruct" {>= "1.4.0"}
-  "mirage-types" {>= "3.0.0"}
-  "mirage-types-lwt" {>= "3.0.0"}
-  "mirage-runtime"
+  "mirage-kv-lwt"
+  "mirage-fs-lwt" {>= "1.0.0"}
   "lwt"
   "rresult"           {test}
   "mirage-clock-unix" {test}
   "alcotest"          {test & >= "0.7.1"}
-  "ounit"             {test}
   "ptime"             {test}
 ]
 available: [ ocaml-version >= "4.03.0"]

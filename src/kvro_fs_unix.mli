@@ -1,6 +1,5 @@
 (*
- * Copyright (c) 2013-2014 Anil Madhavapeddy <anil@recoil.org>
- * Copyright (c) 2014      Thomas Gazagnaire <thomas@gazagnaire.org>
+ * Copyright (c) 2013 Anil Madhavapeddy <anil@recoil.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,16 +14,5 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-(** Loopback implementation of the FS signature. *)
-
-type fs_error = [
-  | `Unix_error of Unix.error
-  | `Unix_errorno of int
-  | `Negative_bytes
-]
-type error = [ V1.Fs.error | fs_error ]
-type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
-
-include V1_LWT.FS with type error := error and type write_error := write_error
-
-val connect : string -> t io
+include Mirage_kv_lwt.RO
+val connect : string -> t Lwt.t

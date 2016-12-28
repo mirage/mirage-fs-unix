@@ -52,8 +52,8 @@ type fs_error = [
   | `Negative_bytes
 ]
 
-type error = [ V1.Fs.error | fs_error ]
-type write_error = [ V1.Fs.write_error | fs_error | `Directory_not_empty ]
+type error = [ Mirage_fs.error | fs_error ]
+type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
 
 let pp_fs_error ppf = function
   | `Unix_errorno i -> Fmt.pf ppf "UNIX errorno: %d" i
@@ -61,13 +61,13 @@ let pp_fs_error ppf = function
   | `Negative_bytes -> Fmt.string ppf "can't read negative bytes"
 
 let pp_error ppf = function
-  | #V1.Fs.error as e -> Mirage_pp.pp_fs_error ppf e
-  | #fs_error as e    -> pp_fs_error ppf e
+  | #Mirage_fs.error as e -> Mirage_fs.pp_error ppf e
+  | #fs_error as e        -> pp_fs_error ppf e
 
 let pp_write_error ppf = function
-  | #V1.Fs.write_error as e -> Mirage_pp.pp_fs_write_error ppf e
-  | #fs_error as e          -> pp_fs_error ppf e
-  | `Directory_not_empty    -> Fmt.string ppf "XXX"
+  | #Mirage_fs.write_error as e -> Mirage_fs.pp_write_error ppf e
+  | #fs_error as e              -> pp_fs_error ppf e
+  | `Directory_not_empty        -> Fmt.string ppf "XXX"
 
 let map_error = function
   | Unix.EISDIR -> Error `Is_a_directory
