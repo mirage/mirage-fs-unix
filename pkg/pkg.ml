@@ -4,7 +4,7 @@
 open Topkg
 
 let opam =
-  let nolint = ["mirage-types-lwt"; "ounit"; "oUnit"] in
+  let nolint = ["ounit"; "oUnit"] in
   Pkg.opam_file ~lint_deps_excluding:(Some nolint) "opam"
 
 let () =
