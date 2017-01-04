@@ -16,6 +16,7 @@
  *)
 
 open Lwt.Infix
+open Result
 
 type +'a io = 'a Lwt.t
 type page_aligned_buffer = Cstruct.t
