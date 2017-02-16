@@ -1,0 +1,38 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="Start" href="index.html">
+<link rel="next" href="Kvro_fs_unix.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="FS_unix" rel="Chapter" href="FS_unix.html">
+<link title="Kvro_fs_unix" rel="Chapter" href="Kvro_fs_unix.html"><title>FS_unix</title>
+</head>
+<body>
+<div class="navbar">&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Kvro_fs_unix.html" title="Kvro_fs_unix">Next</a>
+</div>
+<h1>Module <a href="type_FS_unix.html">FS_unix</a></h1>
+
+<pre><span class="keyword">module</span> FS_unix: <code class="code"><span class="keyword">sig</span></code> <a href="FS_unix.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
+Loopback implementation of the FS signature.<br>
+</div>
+<hr width="100%">
+
+<pre><span id="TYPEfs_error"><span class="keyword">type</span> <code class="type"></code>fs_error</span> = <code class="type">[ `Negative_bytes | `Unix_error of Unix.error | `Unix_errorno of int ]</code> </pre>
+
+
+<pre><span id="TYPEerror"><span class="keyword">type</span> <code class="type"></code>error</span> = <code class="type">[ `Is_a_directory<br>       | `Negative_bytes<br>       | `No_directory_entry<br>       | `Not_a_directory<br>       | `Unix_error of Unix.error<br>       | `Unix_errorno of int ]</code> </pre>
+
+
+<pre><span id="TYPEwrite_error"><span class="keyword">type</span> <code class="type"></code>write_error</span> = <code class="type">[ `Directory_not_empty<br>       | `File_already_exists<br>       | `Is_a_directory<br>       | `Negative_bytes<br>       | `No_directory_entry<br>       | `No_space<br>       | `Not_a_directory<br>       | `Unix_error of Unix.error<br>       | `Unix_errorno of int ]</code> </pre>
+
+
+<pre><span class="keyword">include</span> Mirage_fs_lwt.S</pre>
+
+<pre><span id="VALconnect"><span class="keyword">val</span> connect</span> : <code class="type">string -> t Lwt.t</code></pre></body></html>
