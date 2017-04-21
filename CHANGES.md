@@ -30,7 +30,7 @@
 * Parent of base directory is base directory (/../ -> /)
 
 1.1.0 (2014-06-09):
-* Add an `FS_unix` module which implements `V1_LWT.FS`
+* Add an `FS_unix` module which implements `Mirage_types_lwt.FS`
 
 1.0.0 (2013-12-16):
 * First public release.
