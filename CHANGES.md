@@ -1,11 +1,11 @@
-1.3.0
-----
+v1.3.0
+------
 
 * Port to MirageOS 3 interfaces.
 * Improve Travis CI distribution coverage for tests.
 
-1.2.1 (2016-08-16)
-----
+v1.2.1 2016-08-16
+-----------------
 
 * Remove use of `lwt.syntax`. (#20, by @yomimono)
 * Remove unused `id` type. (#19, by @talex5)
@@ -20,7 +20,7 @@
 * Add Travis CI unit test file.
 
 1.1.3 (2014-10-16)
-* Fix FS_unix.create and FS_unix.write
+* Fix `FS_unix.create` and `FS_unix.write`
 
 1.1.2 (2014-09-11)
 * Fix quadratic behavior (#5)

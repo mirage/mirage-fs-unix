@@ -18,7 +18,7 @@ open Lwt.Infix
 open Mirage_fs
 open Result
 
-let test_fs = "test/test_directory"
+let test_fs = "test_directory"
 let empty_file = "empty"
 let content_file = "content"
 let big_file = "big_file"

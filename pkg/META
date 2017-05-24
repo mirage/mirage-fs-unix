@@ -1,7 +1,0 @@
-version         = "%%VERSION_NUM%%"
-description     = "Mirage filesystem driver for Unix"
-requires        = "lwt lwt.unix mirage-fs-lwt cstruct.lwt"
-archive(byte)   = "mirage-fs-unix.cma"
-plugin(byte)    = "mirage-fs-unix.cma"
-plugin(native)  = "mirage-fs-unix.cmxs"
-archive(native) = "mirage-fs-unix.cmxa"

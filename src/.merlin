@@ -1,0 +1,23 @@
+B ../../_build/default/mirage-device/src
+B ../../_build/default/mirage-fs-unix/src
+B ../../_build/default/mirage-fs/lwt
+B ../../_build/default/mirage-fs/src
+B ../../_build/default/mirage-kv/lwt
+B ../../_build/default/mirage-kv/src
+FLG -w -40
+PKG bigarray
+PKG bytes
+PKG cstruct
+PKG cstruct.lwt
+PKG fmt
+PKG lwt
+PKG lwt.log
+PKG lwt.unix
+PKG ocplib-endian
+PKG ocplib-endian.bigstring
+PKG result
+PKG sexplib
+PKG sexplib.0
+PKG uchar
+PKG unix
+S .
