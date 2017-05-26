@@ -7,15 +7,13 @@ dev-repo:     "https://github.com/mirage/mirage-fs-unix.git"
 bug-reports:  "https://github.com/mirage/mirage-fs-unix/issues"
 doc:          "https://mirage.github.io/mirage-fs-unix/"
 tags:         [ "org:mirage" ]
+build: [["jbuilder" "build" "-p" name "-j" jobs]]
+build-test: [["jbuilder" "runtest" "-p" name "-j" jobs]]
 
-build: ["ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "false"]
-build-test: [
-  ["ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true"]
-  ["ocaml" "pkg/pkg.ml" "test"]
-]
 depends: [
-  "ocamlfind" {build}
+  "jbuilder" {build & >="1.0+beta7"}
   "cstruct" {>= "1.4.0"}
+  "cstruct-lwt"
   "mirage-kv-lwt" {>= "1.0.0"}
   "mirage-fs-lwt" {>= "1.0.0"}
   "lwt"
