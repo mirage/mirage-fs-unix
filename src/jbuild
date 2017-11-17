@@ -2,5 +2,5 @@
  ((name        mirage_fs_unix)
   (public_name mirage-fs-unix)
   (wrapped     false)
-  (libraries   (mirage-kv-lwt mirage-fs-lwt result lwt.unix cstruct.lwt))
-))
+  (libraries   (mirage-kv-lwt mirage-fs-lwt lwt.unix cstruct.lwt))
+  (flags (:standard -safe-string))))
