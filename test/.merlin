@@ -1,13 +1,5 @@
-B ../../_build/default/mirage-clock/lwt
-B ../../_build/default/mirage-clock/src
-B ../../_build/default/mirage-clock/unix
-B ../../_build/default/mirage-device/src
-B ../../_build/default/mirage-fs-unix/src
-B ../../_build/default/mirage-fs-unix/test
-B ../../_build/default/mirage-fs/lwt
-B ../../_build/default/mirage-fs/src
-B ../../_build/default/mirage-kv/lwt
-B ../../_build/default/mirage-kv/src
+B ../_build/default/src
+B ../_build/default/test
 FLG -w -40
 PKG alcotest
 PKG astring
@@ -15,6 +7,7 @@ PKG bigarray
 PKG bytes
 PKG cmdliner
 PKG cstruct
+PKG cstruct-lwt
 PKG cstruct.lwt
 PKG fmt
 PKG fmt.cli
@@ -22,8 +15,14 @@ PKG fmt.tty
 PKG lwt
 PKG lwt.log
 PKG lwt.unix
-PKG ocplib-endian
-PKG ocplib-endian.bigstring
+PKG mirage-clock
+PKG mirage-clock-lwt
+PKG mirage-clock-unix
+PKG mirage-device
+PKG mirage-fs
+PKG mirage-fs-lwt
+PKG mirage-kv
+PKG mirage-kv-lwt
 PKG ptime
 PKG result
 PKG rresult
@@ -31,4 +30,4 @@ PKG sexplib
 PKG sexplib.0
 PKG uchar
 PKG unix
-S .
+S ../src
