@@ -1,6 +1,0 @@
-PKG lwt.unix cstruct mirage-fs-lwt mirage-kv-lwt ptime rresult
-PKG ptime.clock.os mirage-clock-unix alcotest
-
-S src/
-S test/
-B _build/**

@@ -17,7 +17,6 @@
  *)
 
 open Lwt.Infix
-open Result
 
 type +'a io = 'a Lwt.t
 
