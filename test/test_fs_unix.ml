@@ -418,7 +418,7 @@ let destroy () =
   | Error _ -> cleanup () >>= fun () -> failf "create failed"
   | Ok () ->
     FS_impl.listdir fs "/" >>= function
-    | Ok []   -> cleanup ()
+    | Ok []   -> Lwt.return_unit
     | Ok _    -> failf "something exists after destroy"
     | Error _ -> failf "error in listdir"
 
