@@ -1,3 +1,9 @@
+v1.5.0 2018-11-09
+-----------------
+
+* fix `FS_unix.destroy` semantics: when given a directory, delete it
+* remove `open Result`
+
 v1.4.1 2017-12-16
 -----------------
 
