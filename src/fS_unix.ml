@@ -116,7 +116,7 @@ let listdir {base} path =
   let path = FS_common.resolve_filename base path in
   list_directory path
 
-let remove path =
+let remove is_top_dir path =
   let rec rm rm_top_dir base p =
     let full = Filename.concat base p in
     Lwt_unix.LargeFile.stat full >>= fun stat ->
@@ -130,12 +130,14 @@ let remove path =
     | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
     | _ -> Lwt.fail (Failure "cannot remove this file, as its type is unknown")
   in
-  Lwt.catch (fun () -> rm false (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
-  (fun e -> FS_common.write_err_catcher e)
+  Lwt.catch (fun () ->
+      rm (not is_top_dir) (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
+    (fun e -> FS_common.write_err_catcher e)
 
 let destroy {base} path =
   let path = FS_common.resolve_filename base path in
-  remove path
+  let base' = FS_common.resolve_filename base "" in
+  remove (String.equal base' path) path
 
 let write {base} path off buf =
   open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
