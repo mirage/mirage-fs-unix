@@ -1,3 +1,10 @@
+v1.6.0 2019-02-02
+-----------------
+
+* upgrade to dune from jbuilder (@avsm)
+* test OCaml 4.07 as well (@avsm)
+* use latest cstruct-lwt package name (@avsm) 
+
 v1.5.0 2018-11-09
 -----------------
 
