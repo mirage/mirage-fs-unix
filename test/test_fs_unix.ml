@@ -18,10 +18,10 @@ open Lwt.Infix
 open Mirage_fs
 
 let test_fs = "test_directory"
-let empty_file = "empty"
-let content_file = "content"
-let big_file = "big_file"
-let directory = "a_directory"
+let empty_file = Mirage_kv.Key.v "empty"
+let content_file = Mirage_kv.Key.v "content"
+let big_file = Mirage_kv.Key.v "big_file"
+let directory = Mirage_kv.Key.v "a_directory"
 
 module FS_impl = FS_unix
 
@@ -40,15 +40,14 @@ let clock = lwt_run (fun () -> Pclock.connect ()) ()
 
 let append_timestamp s =
   let now = Ptime.v (Pclock.now_d_ps clock) in
-  Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) now
+  let str = Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) now in
+  Mirage_kv.Key.v str
 
-let full_path dirname filename = dirname ^ "/" ^ filename
+let full_path dirname filename = Mirage_kv.Key.add dirname filename
 
-let just_one_and_is expected read_bufs =
-  Alcotest.(check int) __LOC__ 1 (List.length read_bufs);
-  Alcotest.(check string) __LOC__
-    expected (Cstruct.to_string (List.hd read_bufs));
-  Lwt.return read_bufs
+let just_one_and_is expected read_buf =
+  Alcotest.(check string) __LOC__ expected read_buf;
+  Lwt.return read_buf
 
 let expect_error_connecting where () =
   Lwt.catch
@@ -57,269 +56,128 @@ let expect_error_connecting where () =
        Lwt.fail_with "expected error")
     (fun _ -> Lwt.return_unit)
 
+let size fs key =
+  FS_impl.get fs key >|= function
+  | Ok data -> Ok (String.length data)
+  | Error e -> Error e
+
 let connect_to_empty_string = expect_error_connecting ""
 
 let connect_to_dev_null = expect_error_connecting "/dev/null"
 
 let read_nonexistent_file file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs file 0 1 >>= function
+  FS_impl.get fs file >>= function
   | Ok _ ->
     failf "read returned Ok when no file was expected. Please make sure there \
-           isn't actually a file  named %s" file
-  | Error (`Is_a_directory) ->
-    failf "Unreasonable error response when trying to read a nonexistent file"
-  | Error `No_directory_entry ->
+           isn't actually a file named %a" Mirage_kv.Key.pp file
+  | Error (`Not_found _) ->
     Lwt.return_unit
-  | Error `Not_a_directory ->
-    failf "not-a-directory when trying to read a non-existent file"
-  | Error _ -> failf "fs errors"
+  | Error e ->
+    failf "Unreasonable error response when trying to read a nonexistent file: %a"
+      FS_impl.pp_error e
 
 let read_empty_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs empty_file 0 1 >>= function
-  | Ok [] -> Lwt.return_unit
+  FS_impl.get fs empty_file >>= function
+  | Ok buf when String.length buf = 0 -> Lwt.return_unit
   | Ok _  -> failf "reading an empty file returned some cstructs"
-  | Error `No_directory_entry ->
-    failf "read failed for a present but empty file; please make sure %s \
-           is present in the test filesystem" empty_file
-  | Error _ ->
-    failf "unhelpful error returned from nonzero size read on an empty file"
-
-let read_zero_bytes () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 0 0 >>= function
-  | Ok [] -> Lwt.return_unit
-  | Ok _  ->
-    failf "reading zero bytes from a non-empty file returned some cstructs"
-  | Error `No_directory_entry ->
-    failf "read failed for a present file; please make  sure %s is present \
-           in the test filesystem" content_file
-  | Error _ ->
-    failf "unhelpful error returned from reading 0 bytes of a non-empty file"
-
-(* reasonable responses are Ok [] or an error *)
-let read_negative_bytes () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 0 (-5) >>= function
-  | Ok [] -> Lwt.return_unit
-  | Ok  _ ->
-    failf "reading -5 bytes from a non-empty file returned some cstructs"
-  | Error `No_directory_entry ->
-    failf "read failed for a present file; please make sure %s is present in \
-           the test filesystem" content_file
-  | Error `Negative_bytes -> Lwt.return_unit
-  | Error _ ->
-    failf "reading negative bytes from a file returned some misclassified error"
-
-let read_too_many_bytes () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 0 65535 >>= function
-  | Ok bufs ->
-    Alcotest.(check int) __LOC__ 1 (List.length bufs);
-    Alcotest.(check int) __LOC__ 13 (Cstruct.len (List.hd bufs));
-    Lwt.return_unit
-  | Error `No_directory_entry ->
-    failf "read failed for a present file; please make sure %s is present in \
-           the test filesystem" content_file
-  | Error _ -> failf "read beyond EOF for a valid file returned an error"
-
-let read_at_offset () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 1 20 >|= do_or_fail >>=
-  just_one_and_is "ome content\n" >>= fun _ -> Lwt.return_unit
-
-let read_subset_of_bytes () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 0 4 >|= do_or_fail >>= just_one_and_is "some" >>=
-  fun _bufs -> Lwt.return_unit
-
-let read_at_offset_past_eof () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.read fs content_file 50 10 >|= do_or_fail >>= function
-  | [] -> Lwt.return_unit
-  | _  -> failf "read returned content when we asked for an offset past EOF"
+  | Error e ->
+    failf "read failed for a present but empty file: %a" FS_impl.pp_error e
 
 let read_big_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.size fs big_file >|= do_or_fail >>= fun size ->
-  FS_impl.read fs big_file 0 10000 >|= do_or_fail >>= function
-  | [] -> failf "read returned nothing for a large file"
-  | (hd::tl::[]) ->
-    Alcotest.(check int) __LOC__
-      (Int64.to_int size) ((Cstruct.len hd) + (Cstruct.len tl));
-    Lwt.return_unit
-  | _ -> failf "read didn't split a large file across pages as expected"
+  size fs big_file >|= do_or_fail >>= fun size' ->
+  FS_impl.get fs big_file >|= do_or_fail >>= function
+  | buf when String.length buf = size' -> Lwt.return_unit
+  | _ -> failf "read returned nothing for a large file"
 
 let size_nonexistent_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  let filename = "^#$\000not a file!!!. &;" in
-  FS_impl.size fs filename >>= function
-  | Ok d -> failf "Got a size of %Ld for absent file" d
-  | Error `No_directory_entry -> Lwt.return_unit
+  let filename = Mirage_kv.Key.v "^#$\000not a file!!!. &;" in
+  size fs filename >>= function
+  | Ok d -> failf "Got a size of %d for absent file" d
+  | Error (`Not_found _) -> Lwt.return_unit
   | Error e -> assert_fail e
 
 let size_empty_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.size fs empty_file >|= do_or_fail >>= fun n ->
-  Alcotest.(check int64) "size of an empty file" (Int64.zero) n;
+  size fs empty_file >|= do_or_fail >>= fun n ->
+  Alcotest.(check int) "size of an empty file" 0 n;
   Lwt.return_unit
 
 let size_small_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.size fs content_file >|= do_or_fail >>= fun n ->
-  Alcotest.(check int64) "size of a small file" (Int64.of_int 13) n;
+  size fs content_file >|= do_or_fail >>= fun n ->
+  Alcotest.(check int) "size of a small file" 13 n;
   Lwt.return_unit
 
 let size_a_directory () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.size fs directory >>= function
-  | Error `Is_a_directory -> Lwt.return_unit
+  size fs directory >>= function
+  | Error (`Value_expected _) -> Lwt.return_unit
   | Error e -> assert_fail e
-  | Ok n -> failf "got size %Ld on a directory" n
+  | Ok n -> failf "got size %d on a directory" n
 
 let size_big_file () =
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.size fs big_file >|= do_or_fail >>= fun size ->
-  Alcotest.(check int64) __LOC__ (Int64.of_int 5000) size;
-  Lwt.return_unit
-
-let mkdir_already_empty_directory () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs directory >|= do_or_fail >>= fun () -> Lwt.return_unit
-
-let mkdir_over_file () =
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs empty_file >>= function
-  | Error `File_already_exists -> Lwt.return_unit
-  | Error e -> assert_write_fail e
-  | Ok () ->
-    (* really?  We're already in trouble, but let's see how bad it is *)
-    FS_impl.stat fs empty_file >>= function
-    | Error _ ->
-      failf "mkdir reported success in making a directory over an existing \
-             file, and now the location isn't even stat-able"
-    | Ok s ->
-      match s.directory with
-      | true -> failf "mkdir made a dir over top of an existing file"
-      | false ->
-        failf "mkdir falsely reported success making a directory over an \
-               existing file"
-
-let mkdir_over_directory_with_contents () =
-  FS_impl.connect test_fs >>= fun fs ->
-  let tempdir = append_timestamp "mkdir_over_directory_with_contents" in
-  FS_impl.mkdir fs tempdir >|= do_or_fail >>= fun () ->
-  FS_impl.mkdir fs (tempdir ^ "/cool tapes") >|= do_or_fail >>= fun () ->
-  FS_impl.mkdir fs tempdir >>= function
-  | Error `Is_a_directory | Error `File_already_exists -> Lwt.return_unit
-  | Error e -> assert_write_fail e
-  | Ok () -> (* did we clobber the subdirectory that was here? *)
-    FS_impl.stat fs (tempdir ^ "/cool tapes") >>= function
-    | Error `No_directory_entry ->
-      failf "mkdir silently clobbered an existing directory and all of its \
-             contents. That is bad. Please fix it."
-    | Error e -> assert_fail e
-    | Ok _    -> Lwt.return_unit
-
-let mkdir_in_path_not_present () =
-  let not_a_thing = "%%#@*%#@  $ /my awesome directory!!!" in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs not_a_thing >|= do_or_fail >>= fun () -> Lwt.return_unit
-
-let mkdir_credibly () =
-  let dirname = append_timestamp "mkdir_credibly" in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.stat fs dirname >|= do_or_fail >>= fun s ->
-  Alcotest.(check bool) __LOC__ true s.directory;
-  Alcotest.(check string) __LOC__ dirname s.filename;
+  size fs big_file >|= do_or_fail >>= fun size ->
+  Alcotest.(check int) __LOC__ 5000 size;
   Lwt.return_unit
 
 let write_not_a_dir () =
   let dirname = append_timestamp "write_not_a_dir" in
   let subdir = "not there" in
   let content = "puppies" in
-  let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
+  let full_path = Mirage_kv.Key.(dirname / subdir / "file") in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|=
-  do_or_fail >>= fun () ->
-  FS_impl.stat fs full_path >>= function
-  | Error `No_directory_entry ->
-    failf "Write to a nonexistent dir falsely claimed success"
-  | Error _ ->
-    failf "Write to nonexistent dir claimed success, but attempting to stat \
-           it fails"
-  | Ok _ ->
-    FS_impl.read fs full_path 0 4096 >|= do_or_fail >>= fun bufs ->
-    Alcotest.(check int) __LOC__  1 (List.length bufs);
-    Alcotest.(check string) __LOC__ content (Cstruct.to_string (List.hd bufs));
+  FS_impl.set fs full_path content >|= do_or_fail >>= fun () ->
+  FS_impl.exists fs full_path >>= function
+  | Error e ->
+    failf "Exists on an existing file failed %a" FS_impl.pp_error e
+  | Ok None ->
+    failf "Exists on an existing file returned None"
+  | Ok (Some `Dictionary) ->
+    failf "Exists on an existing file returned a dictionary"
+  | Ok (Some `Value) ->
+    FS_impl.get fs full_path >|= do_or_fail >>= fun buf ->
+    Alcotest.(check string) __LOC__ content buf;
     Lwt.return_unit
 
 let write_zero_bytes () =
   let dirname = append_timestamp "mkdir_not_a_dir" in
   let subdir = "not there" in
-  let full_path = (dirname ^ "/" ^ subdir ^ "/" ^ "file") in
+  let full_path = Mirage_kv.Key.(dirname / subdir / "file") in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 0 (Cstruct.create 0) >|= do_or_fail >>= fun () ->
+  FS_impl.set fs full_path "" >|= do_or_fail >>= fun () ->
   (* make sure it's size 0 *)
-  FS_impl.stat fs full_path >>= function
-  | Ok stat -> Alcotest.(check int64) __LOC__ Int64.zero stat.size;
+  size fs full_path >>= function
+  | Ok n -> Alcotest.(check int) __LOC__ 0 n;
     Lwt.return_unit
-  | Error `No_directory_entry ->
-    failf "write claimed to create a file that the fs then couldn't find"
-  | Error _ ->
-    failf "write claimed to create a file, but trying to stat it fails"
+  | Error e ->
+    failf "write claimed to create a file that the fs then couldn't read: %a"
+      FS_impl.pp_error e
 
 let write_contents_correct () =
   let dirname = append_timestamp "write_contents_correct" in
   let full_path = full_path dirname "short_phrase" in
   let phrase = "standing here on this frozen lake" in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string phrase) >|=
-  do_or_fail >>= fun () ->
-  FS_impl.read fs full_path 0 (String.length phrase) >|= do_or_fail >>=
+  FS_impl.set fs full_path phrase >|= do_or_fail >>= fun () ->
+  FS_impl.get fs full_path >|= do_or_fail >>=
   just_one_and_is phrase >>= fun _ -> Lwt.return_unit
-
-let write_at_offset_within_file () =
-  let dirname = append_timestamp "mkdir_not_a_dir" in
-  let full_path = full_path dirname "content" in
-  let preamble = "given this information, " in
-  let boring = "action is required." in
-  let better_idea = "let's go ride bikes" in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string (preamble ^ boring))
-  >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path (String.length preamble) (Cstruct.of_string
-                                                         better_idea)
-  >|= do_or_fail >>= fun () ->
-  FS_impl.read fs full_path 0 4096 >|= do_or_fail >>= fun read_bufs ->
-  just_one_and_is (preamble ^ better_idea) read_bufs >>= fun _ ->
-  Lwt.return_unit
-
-let write_at_offset_past_eof () =
-  let dirname = append_timestamp "write_at_offset_past_eof" in
-  let full_path = full_path dirname "initially_contentful" in
-  let content = "repetition for its own sake." in
-  let replacement = "ating yourself is super fun!" in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string content) >|=
-  do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 4 (Cstruct.of_string replacement) >|=
-  do_or_fail >>= fun () ->
-  FS_impl.stat fs full_path >|= do_or_fail >>= fun _ ->
-  FS_impl.read fs full_path 0 4096 >|= do_or_fail >>= fun read_bufs ->
-  just_one_and_is ("repe" ^ replacement) read_bufs >>= fun _ ->
-  Lwt.return_unit
 
 let write_overwrite_dir () =
   let dirname = append_timestamp "write_overwrite_dir" in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.mkdir fs dirname >|= do_or_fail >>= fun () ->
-  FS_impl.write fs dirname 0 (Cstruct.of_string "noooooo") >>= function
+  let subdir = Mirage_kv.Key.(dirname / "data") in
+  FS_impl.set fs subdir "noooooo" >|= do_or_fail >>= fun () ->
+  FS_impl.set fs dirname "noooooo" >>= function
+    (* TODO: should this produce an error? *)
+    (* file system has /overwrite_dir/data <- File, contents "noooo"
+       Attempt to write a _file_ /overwrite_dir/ with contents "nooooo"
+       --> should this remove the /overwrite_dir/data and /overwrite_dir first?
+       or, alternatively error out due to Value_expected? *)
   | Error `Is_a_directory -> Lwt.return_unit
   | Error e -> assert_write_fail e
   | Ok () -> (* check to see whether it actually overwrote or just failed to
@@ -339,7 +197,7 @@ let write_at_offset_is_eof () =
   >|= do_or_fail >>= fun () ->
   FS_impl.write fs full_path (String.length extant_data) (Cstruct.of_string new_data)
   >|= do_or_fail >>= fun () ->
-  FS_impl.read fs full_path 0
+  FS_impl.get fs full_path 0
     ((String.length extant_data) + String.length new_data)
   >|= do_or_fail >>= just_one_and_is (extant_data ^ new_data) >>= fun _ ->
   Lwt.return_unit
@@ -353,7 +211,7 @@ let write_at_offset_beyond_eof () =
   do_or_fail >>= fun () ->
   FS_impl.write fs full_path 10 (Cstruct.of_string "pation") >|=
   do_or_fail >>= fun () ->
-  FS_impl.read fs full_path 0 4096 >|= do_or_fail
+  FS_impl.get fs full_path 0 4096 >|= do_or_fail
   >>= just_one_and_is "antici\000\000\000\000pation" >>= fun _ -> Lwt.return_unit
 
 let write_big_file () =
@@ -371,14 +229,14 @@ let write_big_file () =
   Cstruct.set_char first_page 4099 'C';
   FS_impl.connect test_fs >>= fun fs ->
   FS_impl.write fs full_path 0 first_page >|= do_or_fail >>= fun () ->
-  FS_impl.size fs full_path >|= do_or_fail >>= fun sz ->
+  size fs full_path >|= do_or_fail >>= fun sz ->
   let check_chars buf a b c =
     Alcotest.(check char) __LOC__ 'A' (Cstruct.get_char buf a);
     Alcotest.(check char) __LOC__ 'B' (Cstruct.get_char buf b);
     Alcotest.(check char) __LOC__ 'C' (Cstruct.get_char buf c)
   in
   Alcotest.(check int64) __LOC__ (Int64.of_int how_big) sz;
-  FS_impl.read fs full_path 0 how_big >|= do_or_fail >>= function
+  FS_impl.get fs full_path 0 how_big >|= do_or_fail >>= function
   | [] -> failf "claimed a big file was empty on read"
   | _::buf::[]-> check_chars buf 1 2 3; Lwt.return_unit
   | _ -> failf "read sent back a nonsensible number of buffers"

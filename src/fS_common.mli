@@ -27,7 +27,7 @@ type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
 val pp_error: error Fmt.t
 val pp_write_error: write_error Fmt.t
 val mem_impl: string -> string -> (bool,  error) result Lwt.t
-val read_impl: string -> string -> int -> int -> (Cstruct.t list, error) result Lwt.t
+val read_impl: string -> Mirage_kv.Key.t -> (string, [ Mirage_kv.error | `Storage_error of Mirage_kv.Key.t * string ]) result Lwt.t
 val size_impl: string -> string -> (int64, error) result Lwt.t
 val resolve_filename: string -> string -> string
 val map_write_error: Unix.error -> ('a, write_error) result

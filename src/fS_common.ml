@@ -100,30 +100,34 @@ let mem_impl base name =
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Ok false)
           | e -> err_catcher e)
 
-let read_impl base name off reqd_len: (Cstruct.t list, error) result Lwt.t =
-  if reqd_len < 0 then Lwt.return (Error `Negative_bytes)
-  else begin
-    let fullname = resolve_filename base name in
-    Lwt.catch (fun () ->
-        Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
-        Lwt_unix.lseek fd off Lwt_unix.SEEK_SET >>= fun _seek -> (* very little we can do with _seek *)
-        let st =
-          Lwt_stream.from (fun () ->
-              let buf = Cstruct.create 4096 in
-              Lwt_cstruct.read fd buf >>= fun len ->
-              match len with
-              | 0 ->
-                Lwt_unix.close fd
-                >>= fun () -> Lwt.return None
-              | len -> Lwt.return (Some (Cstruct.sub buf 0 (min len reqd_len)))
-            )
-        in
-        Lwt_stream.to_list st >|= fun bufs ->
-        match reqd_len with
-        | 0 -> Ok []
-        | _ -> Ok bufs)
-      err_catcher
-  end
+let read_impl base key =
+  let name = Mirage_kv.Key.to_string key in
+  let fullname = resolve_filename base name in
+  Lwt.catch (fun () ->
+      Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
+      Lwt.finalize (fun () ->
+          Lwt_unix.LargeFile.fstat fd >>= fun stat ->
+          if stat.Lwt_unix.LargeFile.st_kind = Lwt_unix.S_REG then
+            let size64 = stat.Lwt_unix.LargeFile.st_size in
+            if size64 > Int64.of_int Sys.max_string_length then
+              Lwt.return (Error (`Storage_error (key, "file too large to process")))
+            else
+              let size = Int64.to_int size64 in
+              let buffer = Bytes.create size in
+              Lwt_unix.read fd buffer 0 size >|= fun read_bytes ->
+              if read_bytes = size then
+                Ok (Bytes.unsafe_to_string buffer)
+              else
+                Error (`Storage_error (key, Printf.sprintf "could not read %d bytes" size))
+          else
+            Lwt.return (Error (`Value_expected key)))
+        (fun () -> Lwt_unix.close fd))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Lwt.return (Error (`Not_found key))
+      | Unix.Unix_error (e, _, _) ->
+        Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+      | e -> Lwt.fail e)
 
 let size_impl base name =
   let fullname = resolve_filename base name in

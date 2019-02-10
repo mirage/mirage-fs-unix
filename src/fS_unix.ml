@@ -20,80 +20,101 @@ open Lwt.Infix
 
 type +'a io = 'a Lwt.t
 
-type page_aligned_buffer = Cstruct.t
+type key = Mirage_kv.Key.t
+type value = string
 
 type t = {
   base: string
 }
 
-type fs_error = FS_common.fs_error
-type error = FS_common.error
-type write_error = FS_common.write_error
-let pp_error = FS_common.pp_error
-let pp_write_error = FS_common.pp_write_error
+type error = [ Mirage_kv.error | `Storage_error of Mirage_kv.Key.t * string ]
+
+let pp_error ppf = function
+  | #Mirage_kv.error as err -> Mirage_kv.pp_error ppf err
+  | `Storage_error (key, msg) -> Fmt.pf ppf "storage error for %a: %s"
+                                   Mirage_kv.Key.pp key msg
+
+type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Directory_not_empty ]
+
+let pp_write_error ppf = function
+  | #Mirage_kv.write_error as err -> Mirage_kv.pp_write_error ppf err
+  | `Directory_not_empty -> Fmt.string ppf "directory not empty"
+  | `Storage_error (key, msg) -> Fmt.pf ppf "storage error for %a: %s"
+                                   Mirage_kv.Key.pp key msg
 
 let disconnect _ = Lwt.return ()
 
-let read {base} name off len =
-  FS_common.read_impl base name off len
-
-let size {base} name =
-  FS_common.size_impl base name
+let get {base} key = FS_common.read_impl base key
 
 (* all mkdirs are mkdir -p *)
-let rec create_directory path =
+let rec create_directory t key =
+  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
   let check_type path =
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
     | Lwt_unix.S_DIR -> Lwt.return (Ok ())
-    | _ -> Lwt.return (Error `File_already_exists)
+    | _ -> Lwt.return (Error (`Dictionary_expected key))
   in
   if Sys.file_exists path then check_type path
   else begin
-    create_directory (Filename.dirname path) >>= function
+    create_directory t (Mirage_kv.Key.parent key) >>= function
     | Error e -> Lwt.return (Error e)
     | Ok () ->
       Lwt.catch (fun () ->
         Lwt_unix.mkdir path 0o755 >>= fun () -> Lwt.return (Ok ())
       )
       (function
-        | Unix.Unix_error (ex, _, _) -> Lwt.return (FS_common.map_write_error ex)
+        | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
         | e -> Lwt.fail e
       )
   end
 
-let mkdir {base} path =
-  let path = FS_common.resolve_filename base path in
-  create_directory path
-
-let open_file base path flags =
-  let path = FS_common.resolve_filename base path in
-  create_directory (Filename.dirname path) >>= function
+let open_file t key flags =
+  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  (* create_directory (Filename.dirname path) *)
+  create_directory t key >>= function
   | Error e -> Lwt.return (Error e)
   | Ok () ->
     Lwt.catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> Ok fd)
+      (function
+        | Unix.Unix_error (Unix.ENOSPC, _, _) -> Lwt.return (Error `No_space)
+        | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+        | e -> Lwt.fail e)
+
+let file_or_directory {base} path0 =
+  let path = FS_common.resolve_filename base (Mirage_kv.Key.to_string path0) in
+  Lwt_unix.LargeFile.stat path >|= fun stat ->
+  match stat.Lwt_unix.LargeFile.st_kind with
+  | Lwt_unix.S_DIR -> Ok `Dictionary
+  | Lwt_unix.S_REG -> Ok `Value
+  | _ -> Error (`Storage_error (path0, "not a regular file"))
+
+(* TODO test this *)
+let exists t path0 =
+  Lwt.catch (fun () -> file_or_directory t path0 >|= function
+    | Error e -> Error e
+    | Ok x -> Ok (Some x))
     (function
-      | Unix.Unix_error (ex, _, _) -> Lwt.return (FS_common.map_write_error ex)
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Ok None)
+      | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (path0, Unix.error_message e)))
       | e -> Lwt.fail e)
 
-let create {base} path =
-  open_file base path [Lwt_unix.O_CREAT] >>= function
-  | Ok fd ->
-    Lwt_unix.close fd >|= fun () ->
-    Ok ()
-  | Error e -> Lwt.return (Error e)
-
-let stat {base} path0 =
-  let path = FS_common.resolve_filename base path0 in
+let last_modified {base} key =
+  let path = FS_common.resolve_filename base (Mirage_kv.Key.to_string key) in
   Lwt.catch (fun () ->
-    Lwt_unix.LargeFile.stat path >>= fun stat ->
-    let size = stat.Lwt_unix.LargeFile.st_size in
-    let filename = Filename.basename path in
-    let read_only = false in
-    let directory = Sys.is_directory path in
-    Lwt.return (Ok { Mirage_fs.filename; read_only; directory; size })
-  )
-  (fun e -> FS_common.err_catcher e)
+      Lwt_unix.LargeFile.stat path >|= fun stat ->
+      let mtime = stat.Lwt_unix.LargeFile.st_mtime in
+      match Ptime.of_float_s mtime with
+      | None -> Error (`Storage_error (key, "mtime parsing failed"))
+      | Some ts -> Ok (Ptime.Span.to_d_ps (Ptime.to_span ts))
+    )
+    (function
+      | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+      | e -> Lwt.fail e)
+
+let batch _ ?retries:_ret _ = assert false
+
+let digest _ _ = assert false
 
 let connect id =
   try if Sys.is_directory id then
@@ -102,61 +123,73 @@ let connect id =
       Lwt.fail_with ("Not a directory " ^  id)
   with Sys_error _ -> Lwt.fail_with ("Not an entity " ^ id)
 
-let list_directory path =
-  if Sys.file_exists path then (
+let list t key =
+  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  Lwt.catch (fun () ->
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
     Lwt_stream.to_list s >>= fun l ->
-    Lwt.return (Ok l)
-  ) else
-    Lwt.return (Ok [])
+    Lwt_list.fold_left_s (fun result filename ->
+        match result with
+        | Error e -> Lwt.return (Error e)
+        | Ok files ->
+          file_or_directory t (Mirage_kv.Key.add key filename) >|= function
+          | Error e -> Error e
+          | Ok kind -> Ok ((filename, kind) :: files))
+      (Ok []) l)
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Error (`Not_found key))
+      | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Lwt.return (Error (`Dictionary_expected key))
+      | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+      | e -> Lwt.fail e)
 
-
-let listdir {base} path =
-  let path = FS_common.resolve_filename base path in
-  list_directory path
-
-let remove is_top_dir path =
-  let rec rm rm_top_dir base p =
-    let full = Filename.concat base p in
-    Lwt_unix.LargeFile.stat full >>= fun stat ->
-    match stat.Lwt_unix.LargeFile.st_kind with
-    | Lwt_unix.S_DIR ->
-      list_directory full >>= (function
-          | Ok files ->
-            Lwt_list.iter_p (rm true full) files >>= fun () ->
-            if rm_top_dir then Lwt_unix.rmdir full else Lwt.return_unit
-          | Error e -> Lwt.fail e)
-    | Lwt_unix.S_REG | Lwt_unix.S_LNK -> Lwt_unix.unlink full
-    | _ -> Lwt.fail (Failure "cannot remove this file, as its type is unknown")
-  in
+let rec remove t key =
+  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
   Lwt.catch (fun () ->
-      rm (not is_top_dir) (Filename.dirname path) (Filename.basename path) >|= fun () -> Ok ())
-    (fun e -> FS_common.write_err_catcher e)
+      file_or_directory t key >>= function
+      | Error e -> Lwt.return (Error e)
+      | Ok `Value ->
+        Lwt_unix.unlink path >|= fun () ->
+        Ok ()
+      | Ok `Dictionary ->
+        list t key >>= function
+        | Error e -> Lwt.return (Error e)
+        | Ok files ->
+          Lwt_list.fold_left_s (fun result (name, _) ->
+              match result with
+              | Error e -> Lwt.return (Error e)
+              | Ok () -> remove t (Mirage_kv.Key.add key name))
+            (Ok ()) files >>= function
+          | Error e -> Lwt.return (Error e)
+          | Ok () -> Lwt_unix.rmdir path >|= fun () -> Ok ())
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Error (`Not_found key))
+      | e -> Lwt.fail e)
 
-let destroy {base} path =
-  let path = FS_common.resolve_filename base path in
-  let base' = FS_common.resolve_filename base "" in
-  remove (String.equal base' path) path
-
-let write {base} path off buf =
-  open_file base path Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
-  | Error e -> Lwt.return (Error e)
-  | Ok fd ->
-    Lwt.catch
-      (fun () ->
-         Lwt_unix.lseek fd off Unix.SEEK_SET >>= fun _seek ->
-         let buf = Cstruct.to_bytes buf in
-         let rec aux off remaining =
-           if remaining = 0 then
-             Lwt_unix.close fd
-           else (
-             Lwt_unix.write fd buf off remaining >>= fun n ->
-             aux (off+n) (remaining-n))
-         in
-         aux 0 (Bytes.length buf) >>= fun () ->
-         Lwt.return (Ok ()))
-      (fun e ->
-         Lwt_unix.close fd >>= fun () ->
-         FS_common.write_err_catcher e
-      )
+(* TODO test this *)
+let set t key value =
+  remove t key >>= function
+  | Error (`Dictionary_expected e) -> Lwt.return (Error (`Dictionary_expected e))
+  | Error (`Storage_error e) -> Lwt.return (Error (`Storage_error e))
+  | Ok () | Error (`Not_found _) ->
+    open_file t key Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok fd ->
+      Lwt.catch
+        (fun () ->
+           let buf = Bytes.unsafe_of_string value in
+           let rec write_once off len =
+             if len = 0 then Lwt_unix.close fd
+             else
+               Lwt_unix.write fd buf off len >>= fun n_written ->
+               if n_written = len + off then
+                 Lwt_unix.close fd
+               else
+                 write_once (off + n_written) (len - n_written)
+           in
+           write_once 0 (String.length value) >|= fun () ->
+           Ok ())
+        (function
+          | Unix.Unix_error (Unix.ENOSPC, _, _) -> Lwt.return (Error `No_space)
+          | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+          | e -> Lwt.fail e)

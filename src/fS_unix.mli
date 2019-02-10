@@ -19,15 +19,10 @@
 
 [@@@ocaml.warning "-34"]
 
-type fs_error = [
-  | `Unix_error of Unix.error
-  | `Unix_errorno of int
-  | `Negative_bytes
-]
-type error = [ Mirage_fs.error | fs_error ]
-type write_error = [ Mirage_fs.write_error | fs_error | `Directory_not_empty ]
+type error = [ Mirage_kv.error | `Storage_error of Mirage_kv.Key.t * string ]
+type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Directory_not_empty ]
 
-include Mirage_fs_lwt.S
+include Mirage_kv_lwt.RW
   with type error := error
    and type write_error := write_error
 
