@@ -42,14 +42,67 @@ let pp_write_error ppf = function
   | `Storage_error (key, msg) -> Fmt.pf ppf "storage error for %a: %s"
                                    Mirage_kv.Key.pp key msg
  
+let split_string delimiter name =
+  let len = String.length name in
+  let rec doit off acc =
+    let open String in
+    let idx = try index_from name off delimiter with _ -> len in
+    let fst = sub name off (idx - off) in
+    let idx' = idx + 1 in
+    if idx' <= len then
+      doit idx' (fst :: acc)
+    else
+      fst :: acc
+  in
+  List.rev (doit 0 [])
+
+let rec remove_dots parts outp =
+  match parts, outp with
+  | ".."::r, _::rt -> remove_dots r  rt
+  | ".."::r, []    -> remove_dots r  []
+  | "."::r , rt    -> remove_dots r  rt
+  | r::rs  , rt    -> remove_dots rs (r :: rt)
+  | []     , rt    -> List.rev rt
+
+let resolve_filename base filename =
+  let parts = split_string '/' filename in
+  let name = remove_dots parts [] |> String.concat "/" in
+  Filename.concat base name
+
+let get {base} key =
+  let name = Mirage_kv.Key.to_string key in
+  let fullname = resolve_filename base name in
+  Lwt.catch (fun () ->
+      Lwt_unix.openfile fullname [Lwt_unix.O_RDONLY] 0 >>= fun fd ->
+      Lwt.finalize (fun () ->
+          Lwt_unix.LargeFile.fstat fd >>= fun stat ->
+          if stat.Lwt_unix.LargeFile.st_kind = Lwt_unix.S_REG then
+            let size64 = stat.Lwt_unix.LargeFile.st_size in
+            if size64 > Int64.of_int Sys.max_string_length then
+              Lwt.return (Error (`Storage_error (key, "file too large to process")))
+            else
+              let size = Int64.to_int size64 in
+              let buffer = Bytes.create size in
+              Lwt_unix.read fd buffer 0 size >|= fun read_bytes ->
+              if read_bytes = size then
+                Ok (Bytes.unsafe_to_string buffer)
+              else
+                Error (`Storage_error (key, Printf.sprintf "could not read %d bytes" size))
+          else
+            Lwt.return (Error (`Value_expected key)))
+        (fun () -> Lwt_unix.close fd))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Lwt.return (Error (`Not_found key))
+      | Unix.Unix_error (e, _, _) ->
+        Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+      | e -> Lwt.fail e)
 
 let disconnect _ = Lwt.return ()
 
-let get {base} key = FS_common.read_impl base key
-
 (* all mkdirs are mkdir -p *)
 let rec create_directory t key =
-  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  let path = resolve_filename t.base (Mirage_kv.Key.to_string key) in
   let check_type path =
     Lwt_unix.LargeFile.stat path >>= fun stat ->
     match stat.Lwt_unix.LargeFile.st_kind with
@@ -71,7 +124,7 @@ let rec create_directory t key =
   end
 
 let open_file t key flags =
-  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  let path = resolve_filename t.base (Mirage_kv.Key.to_string key) in
   (* create_directory (Filename.dirname path) *)
   create_directory t (Mirage_kv.Key.parent key) >>= function
   | Error e -> Lwt.return (Error e)
@@ -83,7 +136,7 @@ let open_file t key flags =
         | e -> Lwt.fail e)
 
 let file_or_directory {base} path0 =
-  let path = FS_common.resolve_filename base (Mirage_kv.Key.to_string path0) in
+  let path = resolve_filename base (Mirage_kv.Key.to_string path0) in
   Lwt_unix.LargeFile.stat path >|= fun stat ->
   match stat.Lwt_unix.LargeFile.st_kind with
   | Lwt_unix.S_DIR -> Ok `Dictionary
@@ -101,7 +154,7 @@ let exists t path0 =
       | e -> Lwt.fail e)
 
 let last_modified {base} key =
-  let path = FS_common.resolve_filename base (Mirage_kv.Key.to_string key) in
+  let path = resolve_filename base (Mirage_kv.Key.to_string key) in
   Lwt.catch (fun () ->
       Lwt_unix.LargeFile.stat path >|= fun stat ->
       let mtime = stat.Lwt_unix.LargeFile.st_mtime in
@@ -125,7 +178,7 @@ let connect id =
   with Sys_error _ -> Lwt.fail_with ("Not an entity " ^ id)
 
 let list t key =
-  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  let path = resolve_filename t.base (Mirage_kv.Key.to_string key) in
   Lwt.catch (fun () ->
     let s = Lwt_unix.files_of_directory path in
     let s = Lwt_stream.filter (fun s -> s <> "." && s <> "..") s in
@@ -145,7 +198,7 @@ let list t key =
       | e -> Lwt.fail e)
 
 let rec remove t key =
-  let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
+  let path = resolve_filename t.base (Mirage_kv.Key.to_string key) in
   Lwt.catch (fun () ->
       file_or_directory t key >>= function
       | Error e -> Lwt.return (Error e)
