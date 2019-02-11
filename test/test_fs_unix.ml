@@ -22,15 +22,15 @@ let content_file = Mirage_kv.Key.v "content"
 let big_file = Mirage_kv.Key.v "big_file"
 let directory = Mirage_kv.Key.v "a_directory"
 
-module FS_impl = FS_unix
+module FS_impl = Mirage_fs_unix
 
 let lwt_run f () = Lwt_main.run (f ())
 
 let do_or_fail = Rresult.R.get_ok
 
 let failf fmt = Fmt.kstrf Alcotest.fail fmt
-let assert_fail e = failf "%a" FS_unix.pp_error e
-let assert_write_fail e = failf "%a" FS_unix.pp_write_error e
+let assert_fail e = failf "%a" FS_impl.pp_error e
+let assert_write_fail e = failf "%a" FS_impl.pp_write_error e
 
 let connect_present_dir () =
   FS_impl.connect test_fs >>= fun _fs -> Lwt.return_unit
