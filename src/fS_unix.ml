@@ -162,7 +162,10 @@ let rec remove t key =
               | Ok () -> remove t (Mirage_kv.Key.add key name))
             (Ok ()) files >>= function
           | Error e -> Lwt.return (Error e)
-          | Ok () -> Lwt_unix.rmdir path >|= fun () -> Ok ())
+          | Ok () -> 
+             if not Mirage_kv.Key.(equal empty key) 
+             then Lwt_unix.rmdir path >|= fun () -> Ok ()
+             else Lwt.return (Ok ()))
     (function
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Error (`Not_found key))
       | e -> Lwt.fail e)

@@ -204,7 +204,7 @@ let write_big_file () =
   if s = "" then failf "claimed a big file was empty on read"
   else check_chars s 4097 4098 4099; Lwt.return_unit
 
-(*
+
 let populate num depth fs =
   let rec gen_d pref = function
     | 0 -> "foo"
@@ -216,54 +216,45 @@ let populate num depth fs =
   in
   (* populate a bit *)
   Lwt_list.iteri_s (fun i x ->
-      FS_impl.create fs (append_timestamp ("foo" ^ x ^ (string_of_int i)))
+      FS_impl.set fs (append_timestamp ("foo" ^ x ^ (string_of_int i))) "test content"
       >|= do_or_fail >>= fun _ -> Lwt.return_unit
   ) (gen_l [] num)
 
 
-let create () =
-  FS_impl.connect test_fs >>= fun fs ->
-  let fn = "createdoesnotyetexist" in
-  FS_impl.create fs fn  >>= function
-  | Error _ -> failf "create failed"
-  | Ok () -> FS_impl.destroy fs fn >>= function
-    | Error _ -> failf "destroy after create failed"
-    | Ok () -> Lwt.return_unit
-
 let destroy () =
-  let files = append_timestamp (test_fs ^ "2") in
+  let files = Mirage_kv.Key.to_string (append_timestamp ("/tmp/" ^ test_fs ^ "2")) in
   Lwt_unix.mkdir files 0o755 >>= fun () ->
   let cleanup () = Lwt_unix.rmdir files in
   FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
-  FS_impl.destroy fs "/" >>= function
+  FS_impl.remove fs Mirage_kv.Key.empty >>= function
   | Error _ -> cleanup () >>= fun () -> failf "create failed"
   | Ok () ->
-    FS_impl.listdir fs "/" >>= function
+    FS_impl.list fs Mirage_kv.Key.empty >>= function
     | Ok []   -> Lwt.return_unit
     | Ok _    -> failf "something exists after destroy"
-    | Error _ -> failf "error in listdir"
+    | Error e -> failf "error %a in listdir" FS_impl.pp_error e
 
 let destroy_a_bit () =
-  let files = append_timestamp (test_fs ^ "3") in
+  let files = Mirage_kv.Key.to_string (append_timestamp ("/tmp/" ^ test_fs ^ "3")) in
   Lwt_unix.mkdir files 0o755 >>= fun () ->
   let cleanup () = let _ = Sys.command ("rm -rf " ^ files) in Lwt.return_unit in
   FS_impl.connect files >>= fun fs ->
   populate 10 4 fs >>= fun () ->
-  FS_impl.listdir fs "/" >>= (function
+  FS_impl.list fs Mirage_kv.Key.empty >>= (function
       | Ok xs -> Lwt.return (List.length xs)
-      | Error _ -> failf "error in listdir") >>= fun files ->
-  FS_impl.create fs "barf" >>= function
+      | Error _ -> failf "error in list") >>= fun files ->
+  FS_impl.set fs (Mirage_kv.Key.v "barf") "dummy content" >>= function
   | Error _ -> cleanup () >>= fun () -> failf "create failed"
-  | Ok ()   -> FS_impl.destroy fs "barf" >>= (function
+  | Ok ()   -> FS_impl.remove fs (Mirage_kv.Key.v "barf") >>= (function
       | Error _ -> cleanup () >>= fun () -> failf "destroy failed"
-      | Ok ()   -> FS_impl.listdir fs "/" >>= (function
+      | Ok ()   -> FS_impl.list fs Mirage_kv.Key.empty >>= (function
           | Ok xs when List.length xs = files -> cleanup ()
           | Ok _ ->
             failf "something wrong in destroy: destroy  followed by create is \
                    not well behaving"
           | Error _ -> failf "error in listdir"))
-*)
+
 let () =
   let connect = [
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -278,14 +269,10 @@ let () =
     "read_empty_file", `Quick, lwt_run read_empty_file;
     "read_big_file", `Quick, lwt_run read_big_file;
   ] in
-(*  let create = [
-    "create_file", `Quick, lwt_run create
-  ] in
   let destroy = [
     "destroy_file", `Quick, lwt_run destroy;
     "create_destroy_file", `Quick, lwt_run destroy_a_bit
   ] in
-*)
   let size = [
     "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
     "size_empty_file", `Quick, lwt_run size_empty_file;
@@ -305,9 +292,7 @@ let () =
     "connect", connect;
     "read", read;
     "size", size;
- (*   "destroy", destroy;
-    "create", create;
-*)
+    "destroy", destroy;
     "listdir", listdir;
     "write", write;
   ]
