@@ -20,7 +20,7 @@
 [@@@ocaml.warning "-34"]
 
 type error = [ Mirage_kv.error | `Storage_error of Mirage_kv.Key.t * string ]
-type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Directory_not_empty ]
+type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Key_exists of Mirage_kv.Key.t ]
 
 include Mirage_kv_lwt.RW
   with type error := error

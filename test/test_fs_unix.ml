@@ -15,7 +15,6 @@
  *)
 
 open Lwt.Infix
-open Mirage_fs
 
 let test_fs = "test_directory"
 let empty_file = Mirage_kv.Key.v "empty"
@@ -66,11 +65,12 @@ let connect_to_empty_string = expect_error_connecting ""
 let connect_to_dev_null = expect_error_connecting "/dev/null"
 
 let read_nonexistent_file file () =
+  let key = Mirage_kv.Key.v file in
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.get fs file >>= function
+  FS_impl.get fs key >>= function
   | Ok _ ->
     failf "read returned Ok when no file was expected. Please make sure there \
-           isn't actually a file named %a" Mirage_kv.Key.pp file
+           isn't actually a file named %a" Mirage_kv.Key.pp key
   | Error (`Not_found _) ->
     Lwt.return_unit
   | Error e ->
@@ -173,46 +173,9 @@ let write_overwrite_dir () =
   let subdir = Mirage_kv.Key.(dirname / "data") in
   FS_impl.set fs subdir "noooooo" >|= do_or_fail >>= fun () ->
   FS_impl.set fs dirname "noooooo" >>= function
-    (* TODO: should this produce an error? *)
-    (* file system has /overwrite_dir/data <- File, contents "noooo"
-       Attempt to write a _file_ /overwrite_dir/ with contents "nooooo"
-       --> should this remove the /overwrite_dir/data and /overwrite_dir first?
-       or, alternatively error out due to Value_expected? *)
-  | Error `Is_a_directory -> Lwt.return_unit
+  | Error (`Key_exists _) -> Lwt.return_unit
   | Error e -> assert_write_fail e
-  | Ok () -> (* check to see whether it actually overwrote or just failed to
-                 return an error *)
-    FS_impl.stat fs dirname >|= do_or_fail >>= fun s ->
-    match s.directory with
-    | true  -> failf "write falsely reported success overwriting a directory"
-    | false -> failf "write overwrite an entire directory!"
-
-let write_at_offset_is_eof () =
-  let dirname = append_timestamp "write_at_offset_is_eof" in
-  let full_path = full_path dirname "database.sql" in
-  let extant_data = "important record do not overwrite :)\n" in
-  let new_data = "some more super important data!\n" in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string extant_data)
-  >|= do_or_fail >>= fun () ->
-  FS_impl.write fs full_path (String.length extant_data) (Cstruct.of_string new_data)
-  >|= do_or_fail >>= fun () ->
-  FS_impl.get fs full_path 0
-    ((String.length extant_data) + String.length new_data)
-  >|= do_or_fail >>= just_one_and_is (extant_data ^ new_data) >>= fun _ ->
-  Lwt.return_unit
-
-let write_at_offset_beyond_eof () =
-  let dirname = append_timestamp "write_at_offset_beyond_eof" in
-  let filename = "database.sql" in
-  let full_path = full_path dirname filename in
-  FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 (Cstruct.of_string "antici") >|=
-  do_or_fail >>= fun () ->
-  FS_impl.write fs full_path 10 (Cstruct.of_string "pation") >|=
-  do_or_fail >>= fun () ->
-  FS_impl.get fs full_path 0 4096 >|= do_or_fail
-  >>= just_one_and_is "antici\000\000\000\000pation" >>= fun _ -> Lwt.return_unit
+  | Ok () -> failf "write overwrote an entire directory! That should not happen!"
 
 let write_big_file () =
   let how_big = 4100 in
@@ -228,19 +191,20 @@ let write_big_file () =
   Cstruct.set_char first_page 4098 'B';
   Cstruct.set_char first_page 4099 'C';
   FS_impl.connect test_fs >>= fun fs ->
-  FS_impl.write fs full_path 0 first_page >|= do_or_fail >>= fun () ->
+  (* TODO get rid of cstruct *)
+  FS_impl.set fs full_path (Cstruct.to_string first_page) >|= do_or_fail >>= fun () ->
   size fs full_path >|= do_or_fail >>= fun sz ->
-  let check_chars buf a b c =
-    Alcotest.(check char) __LOC__ 'A' (Cstruct.get_char buf a);
-    Alcotest.(check char) __LOC__ 'B' (Cstruct.get_char buf b);
-    Alcotest.(check char) __LOC__ 'C' (Cstruct.get_char buf c)
+  let check_chars str a b c =
+    Alcotest.(check char) __LOC__ 'A' (String.get str a);
+    Alcotest.(check char) __LOC__ 'B' (String.get str b);
+    Alcotest.(check char) __LOC__ 'C' (String.get str c)
   in
-  Alcotest.(check int64) __LOC__ (Int64.of_int how_big) sz;
-  FS_impl.get fs full_path 0 how_big >|= do_or_fail >>= function
-  | [] -> failf "claimed a big file was empty on read"
-  | _::buf::[]-> check_chars buf 1 2 3; Lwt.return_unit
-  | _ -> failf "read sent back a nonsensible number of buffers"
+  Alcotest.(check int) __LOC__ how_big sz;
+  FS_impl.get fs full_path >|= do_or_fail >>= fun s ->
+  if s = "" then failf "claimed a big file was empty on read"
+  else check_chars s 4097 4098 4099; Lwt.return_unit
 
+(*
 let populate num depth fs =
   let rec gen_d pref = function
     | 0 -> "foo"
@@ -299,7 +263,7 @@ let destroy_a_bit () =
             failf "something wrong in destroy: destroy  followed by create is \
                    not well behaving"
           | Error _ -> failf "error in listdir"))
-
+*)
 let () =
   let connect = [
     "connect_to_empty_string", `Quick, lwt_run connect_to_empty_string;
@@ -312,21 +276,16 @@ let () =
     "read_nonexistent_file_from_dir", `Quick,
     lwt_run (read_nonexistent_file "not a *dir*?!?/thing_that_isn't_in root!!!.space");
     "read_empty_file", `Quick, lwt_run read_empty_file;
-    "read_zero_bytes", `Quick, lwt_run read_zero_bytes;
-    "read_negative_bytes", `Quick, lwt_run read_negative_bytes;
-    "read_too_many_bytes", `Quick, lwt_run read_too_many_bytes;
-    "read_at_offset", `Quick, lwt_run read_at_offset;
-    "read_subset_of_bytes", `Quick, lwt_run read_subset_of_bytes;
-    "read_at_offset_past_eof", `Quick, lwt_run read_at_offset_past_eof;
     "read_big_file", `Quick, lwt_run read_big_file;
   ] in
-  let create = [
+(*  let create = [
     "create_file", `Quick, lwt_run create
   ] in
   let destroy = [
     "destroy_file", `Quick, lwt_run destroy;
     "create_destroy_file", `Quick, lwt_run destroy_a_bit
   ] in
+*)
   let size = [
     "size_nonexistent_file", `Quick, lwt_run size_nonexistent_file;
     "size_empty_file", `Quick, lwt_run size_empty_file;
@@ -334,32 +293,21 @@ let () =
     "size_a_directory", `Quick, lwt_run size_a_directory;
     "size_big_file", `Quick, lwt_run size_big_file;
   ] in
-  let mkdir = [
-    "mkdir_credibly", `Quick, lwt_run mkdir_credibly;
-    "mkdir_already_empty_directory", `Quick, lwt_run mkdir_already_empty_directory;
-    "mkdir_over_file", `Quick, lwt_run mkdir_over_file;
-    "mkdir_over_directory_with_contents", `Quick, lwt_run mkdir_over_directory_with_contents;
-    "mkdir_in_path_not_present", `Quick, lwt_run mkdir_in_path_not_present;
-  ] in
   let listdir = [ ] in
   let write = [
     "write_not_a_dir", `Quick, lwt_run write_not_a_dir;
     "write_zero_bytes", `Quick, lwt_run write_zero_bytes;
     "write_contents_correct", `Quick, lwt_run write_contents_correct;
-    "write_at_offset_within_file", `Quick, lwt_run write_at_offset_within_file;
-    "write_at_offset_past_eof", `Quick, lwt_run write_at_offset_past_eof;
     "write_overwrite_dir", `Quick, lwt_run write_overwrite_dir;
-    "write_at_offset_is_eof", `Quick, lwt_run write_at_offset_is_eof;
-    "write_at_offset_beyond_eof", `Quick, lwt_run write_at_offset_beyond_eof;
     "write_big_file", `Quick, lwt_run write_big_file;
   ] in
   Alcotest.run "FS_impl" [
     "connect", connect;
     "read", read;
     "size", size;
-    "mkdir", mkdir;
-    "destroy", destroy;
+ (*   "destroy", destroy;
     "create", create;
+*)
     "listdir", listdir;
     "write", write;
   ]

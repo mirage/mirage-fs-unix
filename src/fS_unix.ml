@@ -34,13 +34,14 @@ let pp_error ppf = function
   | `Storage_error (key, msg) -> Fmt.pf ppf "storage error for %a: %s"
                                    Mirage_kv.Key.pp key msg
 
-type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Directory_not_empty ]
+type write_error = [ Mirage_kv.write_error | `Storage_error of Mirage_kv.Key.t * string | `Key_exists of Mirage_kv.Key.t ]
 
 let pp_write_error ppf = function
   | #Mirage_kv.write_error as err -> Mirage_kv.pp_write_error ppf err
-  | `Directory_not_empty -> Fmt.string ppf "directory not empty"
+  | `Key_exists key -> Fmt.pf ppf "key %a already exists and is a dictionary" Mirage_kv.Key.pp key
   | `Storage_error (key, msg) -> Fmt.pf ppf "storage error for %a: %s"
                                    Mirage_kv.Key.pp key msg
+ 
 
 let disconnect _ = Lwt.return ()
 
@@ -72,7 +73,7 @@ let rec create_directory t key =
 let open_file t key flags =
   let path = FS_common.resolve_filename t.base (Mirage_kv.Key.to_string key) in
   (* create_directory (Filename.dirname path) *)
-  create_directory t key >>= function
+  create_directory t (Mirage_kv.Key.parent key) >>= function
   | Error e -> Lwt.return (Error e)
   | Ok () ->
     Lwt.catch (fun () -> Lwt_unix.openfile path flags 0o644 >|= fun fd -> Ok fd)
@@ -168,28 +169,31 @@ let rec remove t key =
 
 (* TODO test this *)
 let set t key value =
-  remove t key >>= function
-  | Error (`Dictionary_expected e) -> Lwt.return (Error (`Dictionary_expected e))
-  | Error (`Storage_error e) -> Lwt.return (Error (`Storage_error e))
-  | Ok () | Error (`Not_found _) ->
-    open_file t key Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
-    | Error e -> Lwt.return (Error e)
-    | Ok fd ->
-      Lwt.catch
-        (fun () ->
-           let buf = Bytes.unsafe_of_string value in
-           let rec write_once off len =
-             if len = 0 then Lwt_unix.close fd
-             else
-               Lwt_unix.write fd buf off len >>= fun n_written ->
-               if n_written = len + off then
-                 Lwt_unix.close fd
+  exists t key >>= function
+  | Ok (Some `Dictionary) -> Lwt.return (Error (`Key_exists key))
+  | _ -> 
+    remove t key >>= function
+    | Error (`Dictionary_expected e) -> Lwt.return (Error (`Dictionary_expected e))
+    | Error (`Storage_error e) -> Lwt.return (Error (`Storage_error e))
+    | Ok () | Error (`Not_found _) ->
+      open_file t key Lwt_unix.([O_WRONLY; O_NONBLOCK; O_CREAT]) >>= function
+      | Error e -> Lwt.return (Error e)
+      | Ok fd ->
+        Lwt.catch
+          (fun () ->
+             let buf = Bytes.unsafe_of_string value in
+             let rec write_once off len =
+               if len = 0 then Lwt_unix.close fd
                else
-                 write_once (off + n_written) (len - n_written)
-           in
-           write_once 0 (String.length value) >|= fun () ->
-           Ok ())
-        (function
-          | Unix.Unix_error (Unix.ENOSPC, _, _) -> Lwt.return (Error `No_space)
-          | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
-          | e -> Lwt.fail e)
+                 Lwt_unix.write fd buf off len >>= fun n_written ->
+                 if n_written = len + off then
+                   Lwt_unix.close fd
+                 else
+                   write_once (off + n_written) (len - n_written)
+             in
+             write_once 0 (String.length value) >|= fun () ->
+             Ok ())
+          (function
+            | Unix.Unix_error (Unix.ENOSPC, _, _) -> Lwt.return (Error `No_space)
+            | Unix.Unix_error (e, _, _) -> Lwt.return (Error (`Storage_error (key, Unix.error_message e)))
+            | e -> Lwt.fail e)
