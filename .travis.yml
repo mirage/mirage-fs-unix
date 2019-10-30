@@ -6,11 +6,11 @@ services:
 sudo: false
 env:
  global:
-   - PRE_INSTALL_HOOK="cd /home/opam/opam-repository && git pull origin master && opam update -u -y"
    - PACKAGE="mirage-fs-unix"
    - TESTS="true"
+   - DISTRO=alpine
  matrix:
-   - DISTRO=alpine OCAML_VERSION=4.04
-   - DISTRO=alpine OCAML_VERSION=4.05
-   - DISTRO=alpine OCAML_VERSION=4.06
-   - DISTRO=alpine OCAML_VERSION=4.07
+   - OCAML_VERSION=4.06
+   - OCAML_VERSION=4.07
+   - OCAML_VERSION=4.08
+   - OCAML_VERSION=4.09

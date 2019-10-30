@@ -14,5 +14,5 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-include Mirage_kv_lwt.RO
-val connect : string -> t Lwt.t
+include Mirage_kv.RO
+val connect : FS_unix.t -> t Lwt.t

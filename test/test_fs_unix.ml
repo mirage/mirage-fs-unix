@@ -36,10 +36,8 @@ let assert_write_fail e = failf "%a" FS_unix.pp_write_error e
 let connect_present_dir () =
   FS_impl.connect test_fs >>= fun _fs -> Lwt.return_unit
 
-let clock = lwt_run (fun () -> Pclock.connect ()) ()
-
 let append_timestamp s =
-  let now = Ptime.v (Pclock.now_d_ps clock) in
+  let now = Ptime.v (Pclock.now_d_ps ()) in
   Fmt.strf "%s-%a" s (Ptime.pp_rfc3339 ~space:false ()) now
 
 let full_path dirname filename = dirname ^ "/" ^ filename
